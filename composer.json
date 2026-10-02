@@ -3,14 +3,18 @@
     "description": "Starlite core: a tiny, database-free PHP micro framework (Datastar, Symfony Routing, Twig, Markdown, Vite), compiled for Opcache.",
     "type": "library",
     "require": {
-        "php": ">=8.2",
+        "php": ">=8.4",
         "league/commonmark": "^2.8",
         "starfederation/datastar-php": "^1.0",
         "symfony/console": "^7.4",
         "symfony/dotenv": "^7.4",
         "symfony/routing": "^7.4",
         "symfony/yaml": "^7.4",
-        "twig/twig": "^3.10"
+        "twig/twig": "^3.10",
+        "symfony/http-foundation": "^7.4",
+        "symfony/security-csrf": "^7.4",
+        "symfony/error-handler": "^7.4",
+        "spatie/schema-org": "^5.0"
     },
     "autoload": {
         "psr-4": {

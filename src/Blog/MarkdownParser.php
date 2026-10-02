@@ -19,6 +19,8 @@ use League\CommonMark\MarkdownConverter;
  *   ---
  *   title: Hello world        (required)
  *   date: 2026-10-01          (required)
+ *   updated: 2026-10-05       (optional, last significant change)
+ *   image: /images/hello.jpg  (optional share image: a path in public/ or an https URL)
  *   summary: Optional teaser  (defaults to the first paragraph)
  *   tags: [php, datastar]
  *   slug: custom-slug         (defaults to the file name without a leading date)
@@ -27,7 +29,7 @@ use League\CommonMark\MarkdownConverter;
  *
  * This only runs when the blog cache is built, never on a cached production request.
  *
- * @phpstan-type Post array{slug: string, title: string, date: string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, source: string}
+ * @phpstan-type Post array{slug: string, title: string, date: string, updated: ?string, image: ?string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, source: string}
  */
 final class MarkdownParser
 {
@@ -103,6 +105,8 @@ final class MarkdownParser
             'slug' => $slug,
             'title' => trim($title),
             'date' => self::date($meta['date'] ?? null, $source),
+            'updated' => isset($meta['updated']) ? self::date($meta['updated'], $source) : null,
+            'image' => self::image($meta['image'] ?? null, $source),
             'summary' => is_string($meta['summary'] ?? null) ? trim($meta['summary']) : self::firstParagraph($html),
             'tags' => array_values(array_unique(array_map(
                 static fn ($tag) => strtolower(trim((string) $tag)),
@@ -128,7 +132,19 @@ final class MarkdownParser
             return $date->format('Y-m-d');
         }
 
-        throw new \RuntimeException("{$source}: front matter needs a \"date\" in YYYY-MM-DD format.");
+        throw new \RuntimeException("{$source}: dates in front matter must use the YYYY-MM-DD format.");
+    }
+
+    private static function image(mixed $value, string $source): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_string($value) && (str_starts_with($value, '/') || preg_match('#^https://\S+$#i', $value))) {
+            return $value;
+        }
+
+        throw new \RuntimeException("{$source}: \"image\" must be a path starting with / or an https:// URL.");
     }
 
     private static function firstParagraph(string $html): string

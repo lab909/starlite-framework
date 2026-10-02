@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Starlite;
 
 use starfederation\datastar\ServerSentEventGenerator;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Twig\Extension\AbstractExtension;
 use Twig\Extension\GlobalsInterface;
 use Twig\TwigFilter;
@@ -83,13 +84,10 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return $this->action('delete', $this->templateUrl($template, $vars), $options);
     }
 
-    /** Any backend action to any URL; adds the CSRF header for non-GET requests. */
+    /** Any backend action to any URL. CSRF needs no token: the kernel checks the browser's origin headers. */
     public function action(string $method, string $url, array $options = []): string
     {
         $method = strtolower($method);
-        if ($method !== 'get') {
-            $options['headers'] = ($options['headers'] ?? []) + ['X-CSRF-Token' => Csrf::token()];
-        }
         $args = json_encode($url, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         if ($options !== []) {
             $args .= ', ' . json_encode($options, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
@@ -168,18 +166,20 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return '';
     }
 
-    /** Sends the queued events (or the raw output, if nothing was queued) as an SSE response. */
-    public function send(string $output): void
+    /** The queued events (or the whole output, if nothing was queued) as a streamed SSE response. */
+    public function response(string $output): StreamedResponse
     {
-        $sse = new ServerSentEventGenerator();
-        $sse->sendHeaders();
-
-        if ($this->queue === [] && trim($output) !== '') {
-            $sse->patchElements($output);
-        }
-        foreach ($this->queue as $event) {
-            $event($sse);
-        }
+        $queue = $this->queue;
         $this->queue = [];
+        if ($queue === [] && trim($output) !== '') {
+            $queue[] = static fn (ServerSentEventGenerator $sse) => $sse->patchElements($output);
+        }
+
+        return new StreamedResponse(static function () use ($queue): void {
+            $sse = new ServerSentEventGenerator();
+            foreach ($queue as $event) {
+                $event($sse);
+            }
+        }, 200, ServerSentEventGenerator::headers());
     }
 }

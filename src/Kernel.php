@@ -5,10 +5,19 @@ declare(strict_types=1);
 namespace Starlite;
 
 use Starlite\Blog\Blog;
-use starfederation\datastar\ServerSentEventGenerator;
+use Starlite\Seo\Seo;
+use starfederation\datastar\Consts;
 use Symfony\Component\Dotenv\Dotenv;
+use Symfony\Component\ErrorHandler\Debug;
+use Symfony\Component\ErrorHandler\ErrorHandler;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Symfony\Component\Routing\Exception\MethodNotAllowedException;
 use Symfony\Component\Routing\Exception\ResourceNotFoundException;
+use Symfony\Component\Security\Csrf\CsrfToken;
+use Symfony\Component\Security\Csrf\SameOriginCsrfTokenManager;
 use Twig\Environment;
 use Twig\Loader\FilesystemLoader;
 use Twig\TwigFunction;
@@ -20,14 +29,32 @@ final class Kernel
     public readonly Router $router;
     public readonly Blog $blog;
     public readonly Vite $vite;
+    public readonly Seo $seo;
     public readonly string $cacheDir;
+
+    private readonly RequestStack $requests;
+    private readonly SameOriginCsrfTokenManager $csrf;
 
     /** Builds the kernel from the app's config/app.php and config/routes.php. `$debug` overrides APP_DEBUG. */
     public static function boot(string $root, ?bool $debug = null): self
     {
         self::loadEnv($root);
         $config = require $root . '/config/app.php';
-        $app = new self($root, $config['secret'], $debug ?? $config['debug']);
+        $debug ??= $config['debug'];
+
+        // Debug: Symfony's exception page, and PHP warnings throw.
+        // Production: uncaught exceptions are logged and rendered by handle(); PHP warnings are only logged.
+        $debug ? Debug::enable() : ErrorHandler::register()->throwAt(0, true);
+
+        // Behind a reverse proxy / load balancer, trust its X-Forwarded-* headers (needed for the CSRF origin check).
+        if ($config['trusted_proxies'] !== []) {
+            Request::setTrustedProxies(
+                $config['trusted_proxies'],
+                Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_HOST | Request::HEADER_X_FORWARDED_PORT | Request::HEADER_X_FORWARDED_PROTO,
+            );
+        }
+
+        $app = new self($root, $config['secret'], $debug, $config['url'], $config['site']);
         (require $root . '/config/routes.php')($app);
 
         return $app;
@@ -46,14 +73,19 @@ final class Kernel
 
     public function __construct(
         public readonly string $root,
-        private readonly string $secret,
+        string $secret,
         public readonly bool $debug = false,
+        string $url = 'http://localhost',
+        array $site = ['name' => 'Starlite', 'description' => '', 'locale' => 'en_US', 'image' => null, 'author' => null],
     ) {
         $this->cacheDir = $root . '/var/cache';
         $this->router = new Router($this->cacheDir, $debug);
         $this->blog = new Blog($root . '/content/blog', $this->cacheDir . '/blog.php', $debug);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->datastar = new Datastar($secret);
+        $this->seo = new Seo(rtrim($url, '/'), $site);
+        $this->requests = new RequestStack();
+        $this->csrf = new SameOriginCsrfTokenManager($this->requests);
 
         $this->twig = new Environment(new FilesystemLoader($root . '/templates'), [
             'cache' => $debug ? false : $this->cacheDir . '/twig',
@@ -63,21 +95,19 @@ final class Kernel
         ]);
         $this->twig->addExtension($this->datastar);
         $this->twig->addExtension($this->vite);
+        $this->twig->addExtension($this->seo);
         $this->twig->addFunction(new TwigFunction('path', $this->router->generate(...)));
         $this->twig->addGlobal('blog', $this->blog);
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
         $this->route(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/datastar', $this->renderDatastarTemplate(...), 'datastar');
-
-        // Signed by `bin/console deploy`; not session based, so no CSRF token.
-        $this->route(['POST'], Opcache::PATH, $this->warmOpcache(...), 'opcache_warm', csrf: false);
     }
 
     // --- Routing --------------------------------------------------------------
 
     /**
      * The handler is a closure, a [Controller::class, 'method'] pair or an invokable controller class.
-     * Route placeholders are passed to it as named arguments.
+     * Route placeholders are passed to it as named arguments. It returns a string (HTML) or a Response.
      *
      * @param string|list<string>                                  $methods
      * @param \Closure|array{class-string, string}|class-string     $handler
@@ -106,40 +136,67 @@ final class Kernel
 
     public function run(): void
     {
-        $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-        $path = rawurldecode(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/');
+        $request = Request::createFromGlobals();
+        $this->handle($request)->prepare($request)->send();
+    }
 
-        header('X-Content-Type-Options: nosniff');
-        header('Referrer-Policy: strict-origin-when-cross-origin');
-        header('X-Frame-Options: SAMEORIGIN');
-
+    public function handle(Request $request): Response
+    {
+        $this->requests->push($request);
+        $this->seo->reset($request->getPathInfo());
         try {
-            [$handler, $params, $csrf] = $this->router->match($method, $path);
+            $response = $this->dispatch($request);
+        } catch (\Throwable $e) {
+            if ($this->debug) {
+                throw $e;
+            }
+            error_log((string) $e);
+            $response = $this->error(500, 'Something went wrong.');
+        } finally {
+            $this->requests->pop();
+        }
+
+        $response->headers->add([
+            'X-Content-Type-Options' => 'nosniff',
+            'Referrer-Policy' => 'strict-origin-when-cross-origin',
+            'X-Frame-Options' => 'SAMEORIGIN',
+        ]);
+
+        // Pages are the same for every visitor (no sessions), so caches may store them
+        // and revalidate cheaply: an unchanged page is answered with an empty 304.
+        if ($request->isMethodCacheable() && $response->isOk() && !$response instanceof StreamedResponse) {
+            $response->setEtag(hash('xxh128', (string) $response->getContent()));
+            $response->setPublic();
+            $response->headers->addCacheControlDirective('no-cache');
+            $response->isNotModified($request);
+        }
+
+        return $response;
+    }
+
+    private function dispatch(Request $request): Response
+    {
+        try {
+            [$handler, $params, $csrf] = $this->router->match($request->getMethod(), $request->getPathInfo());
         } catch (ResourceNotFoundException) {
-            $this->abort(404, 'Not found.');
-
-            return;
+            return $this->error(404, 'Not found.');
         } catch (MethodNotAllowedException $e) {
-            header('Allow: ' . implode(', ', $e->getAllowedMethods()));
-            $this->abort(405, 'Method not allowed.');
-
-            return;
+            return $this->error(405, 'Method not allowed.', ['Allow' => implode(', ', $e->getAllowedMethods())]);
         }
 
-        if ($csrf && !in_array($method, ['GET', 'HEAD'], true) && !Csrf::isValid()) {
-            $this->abort(403, 'Invalid CSRF token.');
-
-            return;
+        // Stateless CSRF protection: the browser's Sec-Fetch-Site / Origin headers must show the
+        // request comes from this site. No token, cookie or session needed.
+        if ($csrf && !$request->isMethodSafe() && !$this->csrf->isTokenValid(new CsrfToken('starlite', 'csrf-token'))) {
+            return $this->error(403, 'Cross-site request blocked.');
         }
 
-        $result = $this->dispatch($handler, $params);
-        if (is_string($result)) {
-            $this->send($result, $method);
-        }
+        $result = $this->call($handler, $params);
+
+        return $result instanceof Response ? $result : new Response((string) $result, 200, ['Content-Type' => 'text/html; charset=utf-8']);
     }
 
     /** Calls a route handler; controller classes get the kernel as their only constructor argument. */
-    private function dispatch(\Closure|array|string $handler, array $params): mixed
+    private function call(\Closure|array|string $handler, array $params): mixed
     {
         if ($handler instanceof \Closure) {
             return $handler(...$params);
@@ -151,93 +208,62 @@ final class Kernel
 
     // --- Responses ------------------------------------------------------------
 
+    public function request(): Request
+    {
+        return $this->requests->getCurrentRequest() ?? throw new \LogicException('No request is being handled.');
+    }
+
     public function render(string $template, array $vars = []): string
     {
         return $this->twig->render($template, $vars);
     }
 
-    /** Renders a template and streams it to the browser as Datastar events. */
-    public function stream(string $template, array $vars = []): void
+    /** Renders a template (with the request's Datastar signals) and returns it as an SSE response. */
+    public function stream(string $template, array $vars = []): StreamedResponse
     {
-        $vars['signals'] = ServerSentEventGenerator::readSignals();
-        $this->datastar->send($this->twig->render($template, $vars));
+        $vars['signals'] = $this->signals();
+
+        return $this->datastar->response($this->twig->render($template, $vars));
     }
 
-    /** Sends an error page (or plain text to Datastar requests, which expect SSE, not HTML). */
-    public function abort(int $status, string $message): void
+    /** An error page, or plain text for Datastar requests, which expect SSE rather than HTML. */
+    public function error(int $status, string $message, array $headers = []): Response
     {
-        http_response_code($status);
-        if (!isset($_SERVER['HTTP_DATASTAR_REQUEST']) && $this->twig->getLoader()->exists('_error.twig')) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo $this->render('_error.twig', ['status' => $status, 'message' => $message]);
+        $isDatastar = $this->requests->getCurrentRequest()?->headers->has('Datastar-Request') ?? false;
+        if (!$isDatastar && $this->twig->getLoader()->exists('_error.twig')) {
+            $this->seo->noindex();
+            try {
+                $html = $this->render('_error.twig', ['status' => $status, 'message' => $message]);
 
-            return;
-        }
-        header('Content-Type: text/plain; charset=utf-8');
-        echo $message;
-    }
-
-    /** Pages are static-like, so a strong ETag lets browsers revalidate with a cheap 304. */
-    private function send(string $body, string $method): void
-    {
-        if ($method === 'GET' || $method === 'HEAD') {
-            $etag = '"' . hash('xxh128', $body) . '"';
-            header('ETag: ' . $etag);
-            header('Cache-Control: no-cache');
-            if (($_SERVER['HTTP_IF_NONE_MATCH'] ?? '') === $etag) {
-                http_response_code(304);
-
-                return;
+                return new Response($html, $status, $headers + ['Content-Type' => 'text/html; charset=utf-8']);
+            } catch (\Throwable $e) {
+                error_log((string) $e);
             }
         }
-        echo $body;
+
+        return new Response($message, $status, $headers + ['Content-Type' => 'text/plain; charset=utf-8']);
     }
 
-    private function renderDatastarTemplate(): void
+    /** Signals sent by Datastar: in the `datastar` query parameter for GET/DELETE, else in the JSON body. */
+    private function signals(): array
     {
-        $config = $this->datastar->decode((string) ($_GET['config'] ?? ''));
-        if ($config === null) {
-            $this->abort(400, 'Invalid Datastar config.');
+        $request = $this->request();
+        $json = in_array($request->getMethod(), ['GET', 'DELETE'], true)
+            ? $request->query->getString(Consts::DATASTAR_KEY)
+            : $request->getContent();
+        $signals = $json !== '' ? json_decode($json, true) : [];
 
-            return;
+        return is_array($signals) ? $signals : [];
+    }
+
+    private function renderDatastarTemplate(): Response
+    {
+        $config = $this->datastar->decode($this->request()->query->getString('config'));
+        if ($config === null) {
+            return $this->error(400, 'Invalid Datastar config.');
         }
         [$template, $vars] = $config;
-        $this->stream(str_ends_with($template, '.twig') ? $template : $template . '.twig', $vars);
-    }
 
-    private function warmOpcache(): void
-    {
-        header('Content-Type: application/json');
-        header('Cache-Control: no-store');
-        if (!Opcache::verify(
-            $this->secret,
-            (string) ($_SERVER['HTTP_X_OPCACHE_TIMESTAMP'] ?? ''),
-            (string) ($_SERVER['HTTP_X_OPCACHE_SIGNATURE'] ?? ''),
-        )) {
-            http_response_code(403);
-            echo '{"error":"Invalid signature."}';
-
-            return;
-        }
-        if (!Opcache::isEnabled()) {
-            http_response_code(503);
-            echo '{"error":"Opcache is not enabled in PHP-FPM."}';
-
-            return;
-        }
-        $listFile = Opcache::listFile($this->cacheDir);
-        if (!is_file($listFile)) {
-            http_response_code(409);
-            echo '{"error":"No file list. Run bin/console deploy."}';
-
-            return;
-        }
-        opcache_invalidate($listFile, true);
-        $result = Opcache::compile(require $listFile);
-        echo json_encode([
-            'compiled' => $result['compiled'],
-            'failed' => count($result['failed']),
-            'memory_used' => opcache_get_status(false)['memory_usage']['used_memory'] ?? null,
-        ], JSON_THROW_ON_ERROR);
+        return $this->stream(str_ends_with($template, '.twig') ? $template : $template . '.twig', $vars);
     }
 }
