@@ -35,7 +35,19 @@ abstract class Controller
         return $this->app->stream($template, $vars);
     }
 
-    protected function notFound(string $message = 'Not found.'): Response
+    /** URL path of a named route in the current language. */
+    protected function path(string $name, array $params = [], ?string $language = null): string
+    {
+        return $this->app->path($name, $params, $language);
+    }
+
+    /** Translates a UI text into the current language. */
+    protected function t(string $message, array $params = []): string
+    {
+        return $this->app->t($message, $params);
+    }
+
+        protected function notFound(string $message = 'Not found.'): Response
     {
         return $this->app->error(404, $message);
     }

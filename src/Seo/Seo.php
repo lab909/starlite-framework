@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Starlite\Seo;
 
 use Spatie\SchemaOrg\Type;
+use Starlite\Site;
 use Twig\Extension\AbstractExtension;
 use Twig\Extension\GlobalsInterface;
 use Twig\TwigFunction;
@@ -31,13 +32,8 @@ final class Seo extends AbstractExtension implements GlobalsInterface
     /** @var list<Type> */
     private array $schemas;
 
-    /**
-     * @param array{name: string, description: string, locale: string, image: ?string, author: ?string} $site
-     */
-    public function __construct(
-        public readonly string $baseUrl,
-        public readonly array $site,
-    ) {
+    public function __construct(public readonly Site $site)
+    {
         $this->reset('/');
     }
 
@@ -47,7 +43,7 @@ final class Seo extends AbstractExtension implements GlobalsInterface
         $this->title = null;
         $this->description = null;
         $this->canonical = $this->url($path);
-        $this->image = $this->site['image'] ? $this->url($this->site['image']) : null;
+        $this->image = $this->site->image ? $this->url($this->site->image) : null;
         $this->type = 'website';
         $this->noindex = false;
         $this->article = [];
@@ -126,14 +122,10 @@ final class Seo extends AbstractExtension implements GlobalsInterface
 
     // --- Output ---------------------------------------------------------------
 
-    /** Absolute URL for a path; absolute http(s) URLs are returned unchanged. */
+    /** Absolute URL for a path (from APP_URL); absolute http(s) URLs are returned unchanged. */
     public function url(string $pathOrUrl): string
     {
-        if (preg_match('#^https?://#i', $pathOrUrl)) {
-            return $pathOrUrl;
-        }
-
-        return $this->baseUrl . '/' . ltrim($pathOrUrl, '/');
+        return $this->site->url($pathOrUrl);
     }
 
     public function canonicalUrl(): string
@@ -148,17 +140,17 @@ final class Seo extends AbstractExtension implements GlobalsInterface
 
     public function pageTitle(): string
     {
-        return $this->title !== null && $this->title !== '' ? $this->title : $this->site['name'];
+        return $this->title !== null && $this->title !== '' ? $this->title : $this->site->name;
     }
 
     public function documentTitle(): string
     {
-        return $this->title !== null && $this->title !== '' ? $this->title . ' · ' . $this->site['name'] : $this->site['name'];
+        return $this->title !== null && $this->title !== '' ? $this->title . ' · ' . $this->site->name : $this->site->name;
     }
 
     public function render(): string
     {
-        $description = $this->description ?? $this->site['description'];
+        $description = $this->description ?? $this->site->description;
 
         $tags = ['<title>' . self::e($this->documentTitle()) . '</title>'];
         $tags[] = self::meta('name', 'description', $description);
@@ -167,12 +159,12 @@ final class Seo extends AbstractExtension implements GlobalsInterface
             $tags[] = self::meta('name', 'robots', 'noindex');
         }
 
-        $tags[] = self::meta('property', 'og:site_name', $this->site['name']);
+        $tags[] = self::meta('property', 'og:site_name', $this->site->name);
         $tags[] = self::meta('property', 'og:type', $this->type);
         $tags[] = self::meta('property', 'og:title', $this->pageTitle());
         $tags[] = self::meta('property', 'og:description', $description);
         $tags[] = self::meta('property', 'og:url', $this->canonical);
-        $tags[] = self::meta('property', 'og:locale', $this->site['locale']);
+        $tags[] = self::meta('property', 'og:locale', $this->site->locale());
         if ($this->image !== null) {
             $tags[] = self::meta('property', 'og:image', $this->image);
         }

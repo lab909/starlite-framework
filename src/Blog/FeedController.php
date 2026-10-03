@@ -20,7 +20,7 @@ final class FeedController extends Controller
         $router = $this->app->router;
         $published = array_filter($this->app->blog->all(), static fn (array $post) => !$post['draft']);
         $posts = array_slice(array_values($published), 0, self::LIMIT);
-        $author = $seo->site['author'] ?? $seo->site['name'];
+        $author = $seo->site->author ?? $seo->site->name;
 
         $xml = new \XMLWriter();
         $xml->openMemory();
@@ -31,8 +31,8 @@ final class FeedController extends Controller
         $xml->writeAttribute('xml:base', $seo->url('/'));
 
         $xml->writeElement('id', $seo->url($router->generate('blog')));
-        $xml->writeElement('title', $seo->site['name']);
-        $xml->writeElement('subtitle', $seo->site['description']);
+        $xml->writeElement('title', $seo->site->name);
+        $xml->writeElement('subtitle', $seo->site->description);
         $xml->writeElement('updated', self::time($posts[0]['updated'] ?? $posts[0]['date'] ?? gmdate('Y-m-d')));
         self::link($xml, $seo->url($router->generate('blog_feed')), 'self', 'application/atom+xml');
         self::link($xml, $seo->url($router->generate('blog')), 'alternate', 'text/html');

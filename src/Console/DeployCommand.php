@@ -99,6 +99,8 @@ final class DeployCommand extends Command
         $io->writeln(sprintf(' ✔ %d blog posts compiled', $app->blog->warmup()));
         $io->writeln(sprintf(' ✔ %d post files published to public%s/', $app->blog->publishAssets($this->root . '/public'), Blog::ASSET_URL));
 
+        $io->writeln(sprintf(' ✔ translations compiled for %d languages', $app->translations->warmup()));
+
         $templates = $this->compileTemplates($app);
         $io->writeln(sprintf(' ✔ %d Twig templates compiled', $templates));
 

@@ -10,6 +10,7 @@ use starfederation\datastar\Consts;
 use Symfony\Component\Dotenv\Dotenv;
 use Symfony\Component\ErrorHandler\Debug;
 use Symfony\Component\ErrorHandler\ErrorHandler;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,6 +20,7 @@ use Symfony\Component\Routing\Exception\ResourceNotFoundException;
 use Symfony\Component\Security\Csrf\CsrfToken;
 use Symfony\Component\Security\Csrf\SameOriginCsrfTokenManager;
 use Twig\Environment;
+use Twig\Extra\Intl\IntlExtension;
 use Twig\Loader\FilesystemLoader;
 use Twig\TwigFunction;
 
@@ -30,6 +32,8 @@ final class Kernel
     public readonly Blog $blog;
     public readonly Vite $vite;
     public readonly Seo $seo;
+    public readonly Site $site;
+    public readonly Translations $translations;
     public readonly string $cacheDir;
 
     private readonly RequestStack $requests;
@@ -54,7 +58,16 @@ final class Kernel
             );
         }
 
-        $app = new self($root, $config['secret'], $debug, $config['url'], $config['site'], $config['blog']['per_page']);
+        $site = new Site(
+            $config['url'],
+            $config['site']['name'],
+            $config['site']['description'],
+            $config['site']['image'],
+            $config['site']['author'],
+            $config['language'],
+            $config['languages'],
+        );
+        $app = new self($root, $config['secret'], $debug, $site, $config['blog']['per_page']);
         (require $root . '/config/routes.php')($app);
 
         return $app;
@@ -75,16 +88,17 @@ final class Kernel
         public readonly string $root,
         string $secret,
         public readonly bool $debug = false,
-        string $url = 'http://localhost',
-        array $site = ['name' => 'Starlite', 'description' => '', 'locale' => 'en_US', 'image' => null, 'author' => null],
+        ?Site $site = null,
         int $postsPerPage = 20,
     ) {
         $this->cacheDir = $root . '/var/cache';
+        $this->site = $site ?? new Site('http://localhost', 'Starlite');
+        $this->translations = new Translations($root . '/translations', $this->site, $debug ? null : $this->cacheDir . '/translations', $debug);
         $this->router = new Router($this->cacheDir, $debug);
         $this->blog = new Blog($root . '/content/blog', $this->cacheDir . '/blog.php', $debug, $postsPerPage);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
-        $this->datastar = new Datastar($secret);
-        $this->seo = new Seo(rtrim($url, '/'), $site);
+        $this->datastar = new Datastar($secret, $this->site);
+        $this->seo = new Seo($this->site);
         $this->requests = new RequestStack();
         $this->csrf = new SameOriginCsrfTokenManager($this->requests);
 
@@ -97,7 +111,10 @@ final class Kernel
         $this->twig->addExtension($this->datastar);
         $this->twig->addExtension($this->vite);
         $this->twig->addExtension($this->seo);
-        $this->twig->addFunction(new TwigFunction('path', $this->router->generate(...)));
+        $this->twig->addExtension($this->site);
+        $this->twig->addExtension($this->translations);
+        $this->twig->addExtension(new IntlExtension()); // format_date / format_number, localized with site.locale
+        $this->twig->addFunction(new TwigFunction('path', $this->path(...)));
         $this->twig->addGlobal('blog', $this->blog);
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
@@ -143,16 +160,25 @@ final class Kernel
 
     public function handle(Request $request): Response
     {
+        // /it/blog → Italian, routed as /blog. The default language never has a prefix: /en/blog → /blog.
+        [$language, $path, $redirect] = $this->site->resolve($request->getPathInfo());
+        if ($redirect) {
+            $query = $request->getQueryString();
+
+            return new RedirectResponse($path . ($query !== null ? '?' . $query : ''), Response::HTTP_MOVED_PERMANENTLY);
+        }
+        $this->site->enter($language, $path);
+
         $this->requests->push($request);
-        $this->seo->reset($request->getPathInfo());
+        $this->seo->reset($this->site->localize($path)); // canonical: /it and /it/ are the same page
         try {
-            $response = $this->dispatch($request);
+            $response = $this->dispatch($request, $path);
         } catch (\Throwable $e) {
             if ($this->debug) {
                 throw $e;
             }
             error_log((string) $e);
-            $response = $this->error(500, 'Something went wrong.');
+            $response = $this->error(500, $this->t('Something went wrong.'));
         } finally {
             $this->requests->pop();
         }
@@ -179,14 +205,14 @@ final class Kernel
         return $response;
     }
 
-    private function dispatch(Request $request): Response
+    private function dispatch(Request $request, string $path): Response
     {
         try {
-            [$handler, $params, $csrf] = $this->router->match($request->getMethod(), $request->getPathInfo());
+            [$handler, $params, $csrf] = $this->router->match($request->getMethod(), $path);
         } catch (ResourceNotFoundException) {
-            return $this->error(404, 'Not found.');
+            return $this->error(404, $this->t('Not found.'));
         } catch (MethodNotAllowedException $e) {
-            return $this->error(405, 'Method not allowed.', ['Allow' => implode(', ', $e->getAllowedMethods())]);
+            return $this->error(405, $this->t('Method not allowed.'), ['Allow' => implode(', ', $e->getAllowedMethods())]);
         }
 
         // Stateless CSRF protection: the browser's Sec-Fetch-Site / Origin headers must show the
@@ -209,6 +235,20 @@ final class Kernel
         [$class, $method] = is_array($handler) ? $handler : [$handler, '__invoke'];
 
         return (new $class($this))->{$method}(...$params);
+    }
+
+    // --- Languages ------------------------------------------------------------
+
+    /** URL path of a named route in the current language (or the given one): path('blog') → "/it/blog". */
+    public function path(string $name, array $params = [], ?string $language = null): string
+    {
+        return $this->site->localize($this->router->generate($name, $params), $language);
+    }
+
+    /** Translates a UI text into the current language (see Translations). */
+    public function t(string $message, array $params = [], ?string $language = null): string
+    {
+        return $this->translations->t($message, $params, $language);
     }
 
     // --- Responses ------------------------------------------------------------

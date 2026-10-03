@@ -27,7 +27,7 @@ final class PostSeo
         }
 
         $url = $seo->canonicalUrl();
-        $author = $seo->site['author'] ?? $seo->site['name'];
+        $author = $seo->site->author ?? $seo->site->name;
         $posting = Schema::blogPosting()
             ->headline($post['title'])
             ->description($post['summary'])
@@ -36,7 +36,7 @@ final class PostSeo
             ->url($url)
             ->mainEntityOfPage($url)
             ->author(Schema::person()->name($author))
-            ->publisher(Schema::organization()->name($seo->site['name'])->url($seo->url('/')));
+            ->publisher(Schema::organization()->name($seo->site->name)->url($seo->url('/')));
         if ($post['tags'] !== []) {
             $posting->keywords(implode(', ', $post['tags']));
         }

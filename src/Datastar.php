@@ -31,6 +31,7 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
 
     public function __construct(
         private readonly string $secret,
+        private readonly ?Site $site = null,
         private readonly string $endpoint = '/datastar',
     ) {
     }
@@ -102,7 +103,8 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
     {
         $payload = self::base64url(json_encode(['t' => $template, 'v' => $vars], JSON_THROW_ON_ERROR));
 
-        return $this->endpoint . '?config=' . $payload . '.' . hash_hmac('sha256', $payload, $this->secret);
+        // Prefixed with the current language (/it/datastar), so the partial renders in that language.
+        return ($this->site?->prefix() ?? '') . $this->endpoint . '?config=' . $payload . '.' . hash_hmac('sha256', $payload, $this->secret);
     }
 
     /** @return array{0: string, 1: array}|null */
