@@ -159,6 +159,17 @@ final class Seo extends AbstractExtension implements GlobalsInterface
             $tags[] = self::meta('name', 'robots', 'noindex');
         }
 
+        // hreflang: the same page in the other languages (only versions that exist), plus x-default.
+        if (count($this->site->languages) > 1 && !$this->noindex) {
+            $alternates = $this->site->alternates();
+            foreach ($alternates as $code => $path) {
+                $tags[] = '<link rel="alternate" hreflang="' . self::e($code) . '" href="' . self::e($this->url($path)) . '">';
+            }
+            if (isset($alternates[$this->site->defaultLanguage])) {
+                $tags[] = '<link rel="alternate" hreflang="x-default" href="' . self::e($this->url($alternates[$this->site->defaultLanguage])) . '">';
+            }
+        }
+
         $tags[] = self::meta('property', 'og:site_name', $this->site->name);
         $tags[] = self::meta('property', 'og:type', $this->type);
         $tags[] = self::meta('property', 'og:title', $this->pageTitle());

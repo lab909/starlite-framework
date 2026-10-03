@@ -8,7 +8,8 @@ use Starlite\Controller;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * /sitemap.xml: every static GET page (no placeholders, no file extension) plus every published blog post.
+ * /sitemap.xml: in every language, the static GET pages (no placeholders, no file extension) and
+ * the published blog posts written in that language.
  */
 final class SitemapController extends Controller
 {
@@ -20,21 +21,24 @@ final class SitemapController extends Controller
         $xml->startElement('urlset');
         $xml->writeAttribute('xmlns', 'http://www.sitemaps.org/schemas/sitemap/0.9');
 
-        foreach ($this->app->router->routes() as $name => $route) {
-            $methods = $route->getMethods();
-            $path = $route->getPath();
-            if ($name === 'datastar' || ($methods !== [] && !in_array('GET', $methods, true))
-                || str_contains($path, '{') || str_contains(basename($path), '.')) {
-                continue;
+        // Every language: the static pages under its prefix, and the posts written in it.
+        foreach (array_keys($this->app->site->languages) as $language) {
+            foreach ($this->app->router->routes() as $name => $route) {
+                $methods = $route->getMethods();
+                $path = $route->getPath();
+                if ($name === 'datastar' || ($methods !== [] && !in_array('GET', $methods, true))
+                    || str_contains($path, '{') || str_contains(basename($path), '.')) {
+                    continue;
+                }
+                self::url($xml, $this->app->seo->url($this->app->site->localize($path, $language)));
             }
-            self::url($xml, $this->app->seo->url($path));
-        }
 
-        foreach ($this->app->blog->all() as $post) {
-            if ($post['draft']) {
-                continue; // only listed while APP_DEBUG=1; never advertise them to crawlers
+            foreach ($this->app->blog->all($language) as $post) {
+                if ($post['draft']) {
+                    continue; // only listed while APP_DEBUG=1; never advertise them to crawlers
+                }
+                self::url($xml, $this->app->seo->url($this->app->path('blog_post', ['slug' => $post['slug']], $language)), $post['updated'] ?? $post['date']);
             }
-            self::url($xml, $this->app->seo->url($this->app->router->generate('blog_post', ['slug' => $post['slug']])), $post['updated'] ?? $post['date']);
         }
 
         $xml->endElement();

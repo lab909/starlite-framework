@@ -8,7 +8,8 @@ use Starlite\Controller;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Atom feed of the latest posts. Expects the app to name its routes `blog` (list) and `blog_post` (post).
+ * Atom feed of the latest posts in the current language (/blog/feed.xml, /it/blog/feed.xml).
+ * Expects the app to name its routes `blog` (list), `blog_post` (post) and `blog_feed` (this feed).
  */
 final class FeedController extends Controller
 {
@@ -17,7 +18,6 @@ final class FeedController extends Controller
     public function __invoke(): Response
     {
         $seo = $this->app->seo;
-        $router = $this->app->router;
         $published = array_filter($this->app->blog->all(), static fn (array $post) => !$post['draft']);
         $posts = array_slice(array_values($published), 0, self::LIMIT);
         $author = $seo->site->author ?? $seo->site->name;
@@ -29,19 +29,20 @@ final class FeedController extends Controller
         $xml->writeAttribute('xmlns', 'http://www.w3.org/2005/Atom');
         // Relative links and images inside post HTML resolve against the site URL.
         $xml->writeAttribute('xml:base', $seo->url('/'));
+        $xml->writeAttribute('xml:lang', $this->app->site->language());
 
-        $xml->writeElement('id', $seo->url($router->generate('blog')));
+        $xml->writeElement('id', $seo->url($this->app->path('blog')));
         $xml->writeElement('title', $seo->site->name);
         $xml->writeElement('subtitle', $seo->site->description);
         $xml->writeElement('updated', self::time($posts[0]['updated'] ?? $posts[0]['date'] ?? gmdate('Y-m-d')));
-        self::link($xml, $seo->url($router->generate('blog_feed')), 'self', 'application/atom+xml');
-        self::link($xml, $seo->url($router->generate('blog')), 'alternate', 'text/html');
+        self::link($xml, $seo->url($this->app->path('blog_feed')), 'self', 'application/atom+xml');
+        self::link($xml, $seo->url($this->app->path('blog')), 'alternate', 'text/html');
         $xml->startElement('author');
         $xml->writeElement('name', $author);
         $xml->endElement();
 
         foreach ($posts as $post) {
-            $url = $seo->url($router->generate('blog_post', ['slug' => $post['slug']]));
+            $url = $seo->url($this->app->path('blog_post', ['slug' => $post['slug']]));
             $xml->startElement('entry');
             $xml->writeElement('id', $url);
             $xml->writeElement('title', $post['title']);

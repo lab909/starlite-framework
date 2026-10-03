@@ -95,7 +95,7 @@ final class Kernel
         $this->site = $site ?? new Site('http://localhost', 'Starlite');
         $this->translations = new Translations($root . '/translations', $this->site, $debug ? null : $this->cacheDir . '/translations', $debug);
         $this->router = new Router($this->cacheDir, $debug);
-        $this->blog = new Blog($root . '/content/blog', $this->cacheDir . '/blog.php', $debug, $postsPerPage);
+        $this->blog = new Blog($root . '/content/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->datastar = new Datastar($secret, $this->site);
         $this->seo = new Seo($this->site);

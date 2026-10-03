@@ -96,7 +96,8 @@ final class DeployCommand extends Command
         $app->router->warmup();
         $io->writeln(sprintf(' ✔ %d routes compiled', count($app->router->routes())));
 
-        $io->writeln(sprintf(' ✔ %d blog posts compiled', $app->blog->warmup()));
+        [$posts, $versions] = $app->blog->warmup();
+        $io->writeln(sprintf(' ✔ %d blog posts compiled (%d language versions)', $posts, $versions));
         $io->writeln(sprintf(' ✔ %d post files published to public%s/', $app->blog->publishAssets($this->root . '/public'), Blog::ASSET_URL));
 
         $io->writeln(sprintf(' ✔ translations compiled for %d languages', $app->translations->warmup()));

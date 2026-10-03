@@ -24,6 +24,12 @@ final class Site extends AbstractExtension implements GlobalsInterface
     /** Current path without the language prefix, e.g. "/blog" for /it/blog. */
     private string $path = '/';
 
+    /** @var array<string, string>|null language => path where the current page exists; null = every language */
+    private ?array $alternates = null;
+
+    /** @var array<string, string> language => path to offer instead, where the page doesn't exist */
+    private array $fallbacks = [];
+
     /**
      * @param string                                             $baseUrl   public URL (APP_URL), no trailing slash
      * @param array<string, array{name: string, locale: string}> $languages code => name and Open Graph locale
@@ -70,6 +76,36 @@ final class Site extends AbstractExtension implements GlobalsInterface
         }
         $this->language = $language;
         $this->path = $path;
+        $this->alternates = null;
+        $this->fallbacks = [];
+    }
+
+    /**
+     * Declares that the current page exists only in some languages (e.g. a post with one translation).
+     * The switcher sends the other languages to their fallback path (or their home page), and hreflang
+     * links list only the existing versions.
+     *
+     * @param array<string, string> $alternates language => path of this page in that language
+     * @param array<string, string> $fallbacks  language => path to offer where it doesn't exist
+     */
+    public function setAlternates(array $alternates, array $fallbacks = []): void
+    {
+        $this->alternates = $alternates;
+        $this->fallbacks = $fallbacks;
+    }
+
+    /** @return array<string, string> language => path of the current page, for every language it exists in */
+    public function alternates(): array
+    {
+        if ($this->alternates !== null) {
+            return $this->alternates;
+        }
+        $paths = [];
+        foreach (array_keys($this->languages) as $code) {
+            $paths[$code] = $this->localize($this->path, $code);
+        }
+
+        return $paths;
     }
 
     /**
@@ -122,17 +158,22 @@ final class Site extends AbstractExtension implements GlobalsInterface
     /**
      * The current page in every language, for a language switcher.
      *
-     * @return list<array{code: string, name: string, url: string, active: bool}>
+     * `available` is false where the page doesn't exist in that language; `url` then points to the
+     * fallback (e.g. that language's blog) or its home page.
+     *
+     * @return list<array{code: string, name: string, url: string, active: bool, available: bool}>
      */
     public function switcher(): array
     {
+        $alternates = $this->alternates();
         $links = [];
         foreach ($this->languages as $code => $language) {
             $links[] = [
                 'code' => $code,
                 'name' => $language['name'],
-                'url' => $this->localize($this->path, $code),
+                'url' => $alternates[$code] ?? $this->fallbacks[$code] ?? $this->localize('/', $code),
                 'active' => $code === $this->language,
+                'available' => isset($alternates[$code]),
             ];
         }
 

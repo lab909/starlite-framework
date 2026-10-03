@@ -5,14 +5,19 @@ declare(strict_types=1);
 namespace Starlite\Blog;
 
 use Starlite\Cache;
+use Starlite\Site;
 
 /**
- * File-based blog. Each post is a folder named after its slug, holding index.md and its files
- * (images, downloads):
+ * File-based blog. Each post is a folder named after its slug, holding one Markdown file per
+ * language and the files (images, downloads) they share:
  *
- *   content/blog/2026/09/hello-starlite/index.md   published, filed by publication month
- *   content/blog/2026/09/hello-starlite/cover.jpg  served as /media/blog/hello-starlite/cover.jpg
- *   content/blog/drafts/next-post/index.md         draft: only visible with APP_DEBUG=1
+ *   content/blog/2026/09/hello-starlite/index.md     default language, filed by publication month
+ *   content/blog/2026/09/hello-starlite/index.it.md  Italian version → /it/blog/hello-starlite
+ *   content/blog/2026/09/hello-starlite/cover.jpg    served as /media/blog/hello-starlite/cover.jpg
+ *   content/blog/drafts/next-post/index.md           draft: only visible with APP_DEBUG=1
+ *
+ * Every method works in the current language (Site::language()) unless one is given. A post
+ * without a version in a language doesn't exist there: not listed, not searchable, 404.
  *
  * Without APP_DEBUG the parsed posts (HTML included) are compiled once into var/cache/blog.php,
  * so a request only reads an Opcache-resident array. Run `bin/console deploy` (or cache:clear)
@@ -41,38 +46,50 @@ final class Blog
 
     private const SLUG = '[a-z0-9]+(?:-[a-z0-9]+)*';
 
-    /** @var array<string, Post>|null slug => post, newest first */
+    /** @var array<string, array<string, Post>>|null language => slug => post, newest first */
     private ?array $posts = null;
 
     public function __construct(
         private readonly string $contentDir,
         private readonly string $cacheFile,
         private readonly bool $debug,
+        private readonly Site $site,
         public readonly int $perPage = 20,
     ) {
     }
 
     /** @return list<Post> newest first */
-    public function all(): array
+    public function all(?string $language = null): array
     {
-        return array_values($this->posts());
+        return array_values($this->posts($language));
     }
 
     /** @return Post|null */
-    public function find(string $slug): ?array
+    public function find(string $slug, ?string $language = null): ?array
     {
-        return $this->posts()[$slug] ?? null;
+        return $this->posts($language)[$slug] ?? null;
+    }
+
+    /** @return list<string> the languages a post exists in, in configured order */
+    public function translations(string $slug): array
+    {
+        return array_values(array_filter(
+            array_keys($this->site->languages),
+            fn (string $language) => isset($this->posts($language)[$slug]),
+        ));
     }
 
     /** Absolute path of a post's published file, or null if the post or file doesn't exist (or is a hidden draft). */
     public function asset(string $slug, string $file): ?string
     {
-        $post = $this->find($slug);
-        if ($post === null || !in_array($file, $post['assets'], true)) {
-            return null;
+        foreach (array_keys($this->site->languages) as $language) {
+            $post = $this->find($slug, $language);
+            if ($post !== null) {
+                return in_array($file, $post['assets'], true) ? $this->contentDir . '/' . dirname($post['source']) . '/' . $file : null;
+            }
         }
 
-        return $this->contentDir . '/' . dirname($post['source']) . '/' . $file;
+        return null;
     }
 
     /**
@@ -83,17 +100,22 @@ final class Blog
     {
         $target = $publicDir . self::ASSET_URL;
         Cache::clear($target);
-        $count = 0;
-        foreach ($this->posts() as $post) {
-            if ($post['draft']) {
-                continue;
+        $folders = [];
+        foreach ($this->compiled() as $posts) {
+            foreach ($posts as $post) {
+                if (!$post['draft']) {
+                    $folders[$post['slug']] = [dirname($post['source']), $post['assets']];
+                }
             }
-            foreach ($post['assets'] as $file) {
-                $to = "{$target}/{$post['slug']}/{$file}";
+        }
+        $count = 0;
+        foreach ($folders as $slug => [$folder, $assets]) {
+            foreach ($assets as $file) {
+                $to = "{$target}/{$slug}/{$file}";
                 if (!is_dir(dirname($to)) && !mkdir(dirname($to), 0775, true) && !is_dir(dirname($to))) {
                     throw new \RuntimeException('Cannot create ' . dirname($to) . '.');
                 }
-                copy($this->contentDir . '/' . dirname($post['source']) . '/' . $file, $to);
+                copy("{$this->contentDir}/{$folder}/{$file}", $to);
                 ++$count;
             }
         }
@@ -102,10 +124,10 @@ final class Blog
     }
 
     /** @return array<string, int> tag => number of posts, most used first */
-    public function tags(): array
+    public function tags(?string $language = null): array
     {
         $tags = [];
-        foreach ($this->posts() as $post) {
+        foreach ($this->posts($language) as $post) {
             foreach ($post['tags'] as $tag) {
                 $tags[$tag] = ($tags[$tag] ?? 0) + 1;
             }
@@ -121,10 +143,10 @@ final class Blog
      *
      * @return array{posts: list<Post>, page: int, pages: int, total: int, has_more: bool}
      */
-    public function page(int|string $page, string $query = '', string $tag = ''): array
+    public function page(int|string $page, string $query = '', string $tag = '', ?string $language = null): array
     {
         $page = max(1, (int) $page);
-        $posts = $query === '' && $tag === '' ? $this->all() : $this->search($query, $tag);
+        $posts = $query === '' && $tag === '' ? $this->all($language) : $this->search($query, $tag, $language);
         $total = count($posts);
         $pages = max(1, (int) ceil($total / $this->perPage));
 
@@ -138,11 +160,11 @@ final class Blog
     }
 
     /** @return list<Post> posts whose title, summary or tags contain $query, optionally limited to one tag */
-    public function search(string $query = '', string $tag = ''): array
+    public function search(string $query = '', string $tag = '', ?string $language = null): array
     {
         $query = mb_strtolower(trim($query));
 
-        return array_values(array_filter($this->posts(), static function (array $post) use ($query, $tag): bool {
+        return array_values(array_filter($this->posts($language), static function (array $post) use ($query, $tag): bool {
             if ($tag !== '' && !in_array($tag, $post['tags'], true)) {
                 return false;
             }
@@ -155,64 +177,89 @@ final class Blog
         }));
     }
 
-    /** Parses every Markdown file and writes the cache. */
-    public function warmup(): int
+    /**
+     * Parses every Markdown file and writes the cache.
+     *
+     * @return array{int, int} posts, language versions
+     */
+    public function warmup(): array
     {
+        $this->posts = null;
         $posts = $this->compile();
         Cache::writeData($this->cacheFile, $posts);
-        $this->posts = null;
+        $this->posts = $posts;
 
-        return count($posts);
-    }
-
-    /** @return array<string, Post> */
-    private function posts(): array
-    {
-        if ($this->posts !== null) {
-            return $this->posts;
+        $slugs = [];
+        foreach ($posts as $versions) {
+            $slugs += array_flip(array_keys($versions));
         }
 
-        return $this->posts = $this->debug ? $this->compile() : Cache::remember($this->cacheFile, $this->compile(...));
+        return [count($slugs), array_sum(array_map('count', $posts))];
     }
 
-    /** @return array<string, Post> */
+    /** @return array<string, Post> slug => post in one language */
+    private function posts(?string $language): array
+    {
+        return $this->compiled()[$language ?? $this->site->language()] ?? [];
+    }
+
+    /** @return array<string, array<string, Post>> */
+    private function compiled(): array
+    {
+        return $this->posts ??= $this->debug ? $this->compile() : Cache::remember($this->cacheFile, $this->compile(...));
+    }
+
+    /** @return array<string, array<string, Post>> language => slug => post, newest first */
     private function compile(): array
     {
         $parser = new MarkdownParser();
-        $posts = [];
-        foreach ($this->postFiles() as $source => [$slug, $draft, $month]) {
+        $posts = array_fill_keys(array_keys($this->site->languages), []);
+        $folders = [];
+        foreach ($this->postFolders() as $folder => [$slug, $draft, $month, $files]) {
             if ($draft && !$this->debug) {
                 continue;
             }
-            $post = $parser->parseFile($this->contentDir . '/' . $source, $slug, $draft, $source, self::ASSET_URL . '/' . $slug);
-            // The folder is the publication month: 2026/09/<slug>/ must hold a post dated 2026-09-xx.
-            if ($month !== null && !str_starts_with($post['date'], $month)) {
-                throw new \RuntimeException("{$source}: date {$post['date']} does not match its YYYY/MM folder.");
+            if (isset($folders[$slug])) {
+                throw new \RuntimeException("Duplicate slug \"{$slug}\": {$folder}/ and {$folders[$slug]}/.");
             }
-            if (isset($posts[$slug])) {
-                throw new \RuntimeException("Duplicate slug \"{$slug}\": {$source} and {$posts[$slug]['source']}.");
+            $folders[$slug] = $folder;
+            $assets = $this->assets("{$this->contentDir}/{$folder}");
+
+            // The default-language version first: translations inherit what they omit from it.
+            $original = null;
+            foreach ($files as $language => $file) {
+                $source = "{$folder}/{$file}";
+                $post = $parser->parseFile("{$this->contentDir}/{$source}", $slug, $language, $draft, $source, self::ASSET_URL . '/' . $slug, $original);
+                // The folder is the publication month: 2026/09/<slug>/ must hold a post dated 2026-09-xx.
+                if ($month !== null && !str_starts_with($post['date'], $month)) {
+                    throw new \RuntimeException("{$source}: date {$post['date']} does not match its YYYY/MM folder.");
+                }
+                $post['assets'] = $assets;
+                $posts[$language][$slug] = $post;
+                $original ??= $language === $this->site->defaultLanguage ? $post : null;
             }
-            $post['assets'] = $this->assets(dirname($this->contentDir . '/' . $source));
-            $posts[$slug] = $post;
         }
-        uasort($posts, static fn (array $a, array $b) => [$b['date'], $a['title']] <=> [$a['date'], $b['title']]);
+        foreach ($posts as &$versions) {
+            uasort($versions, static fn (array $a, array $b) => [$b['date'], $a['title']] <=> [$a['date'], $b['title']]);
+        }
+        unset($versions);
 
         return $posts;
     }
 
     /**
-     * Every post's index.md, as "2026/09/hello-starlite/index.md" => [slug, is draft, "2026-09" or null].
-     * Markdown files anywhere else are an error rather than silently skipped, so a misplaced post
-     * can't go unnoticed.
+     * Every post folder, as "2026/09/hello-starlite" => [slug, is draft, "2026-09" or null, language => file],
+     * with the default language's file first. Markdown files anywhere else, or for a language that
+     * isn't configured, are an error rather than silently skipped, so nothing goes unnoticed.
      *
-     * @return array<string, array{string, bool, ?string}>
+     * @return array<string, array{string, bool, ?string, array<string, string>}>
      */
-    private function postFiles(): array
+    private function postFolders(): array
     {
         if (!is_dir($this->contentDir)) {
             return [];
         }
-        $files = [];
+        $folders = [];
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($this->contentDir, \FilesystemIterator::SKIP_DOTS),
         );
@@ -221,20 +268,37 @@ final class Blog
                 continue;
             }
             $source = substr($file->getPathname(), strlen($this->contentDir) + 1);
-            if (preg_match('#^(\d{4})/(0[1-9]|1[0-2])/(' . self::SLUG . ')/index\.md$#', $source, $m)) {
-                $files[$source] = [$m[3], false, "{$m[1]}-{$m[2]}"];
-            } elseif (preg_match('#^drafts/(' . self::SLUG . ')/index\.md$#', $source, $m)) {
-                $files[$source] = [$m[1], true, null];
+            $index = 'index(?:\.([a-z]{2}(?:-[a-z]{2})?))?\.md';
+            if (preg_match('#^((\d{4})/(0[1-9]|1[0-2])/(' . self::SLUG . '))/' . $index . '$#', $source, $m)) {
+                [$folder, $slug, $draft, $month, $code] = [$m[1], $m[4], false, "{$m[2]}-{$m[3]}", $m[5] ?? ''];
+            } elseif (preg_match('#^(drafts/(' . self::SLUG . '))/' . $index . '$#', $source, $m)) {
+                [$folder, $slug, $draft, $month, $code] = [$m[1], $m[2], true, null, $m[3] ?? ''];
             } else {
                 throw new \RuntimeException(
-                    "{$source}: posts must be content/blog/YYYY/MM/<slug>/index.md or content/blog/drafts/<slug>/index.md, "
-                    . 'with a slug of lowercase letters, digits and dashes.',
+                    "{$source}: posts must be content/blog/YYYY/MM/<slug>/index.md or content/blog/drafts/<slug>/index.md "
+                    . '(translations: index.<language>.md), with a slug of lowercase letters, digits and dashes.',
                 );
             }
+            $language = $code === '' ? $this->site->defaultLanguage : $code;
+            if ($code === $this->site->defaultLanguage) {
+                throw new \RuntimeException("{$source}: the default language ({$code}) is index.md, without a language code.");
+            }
+            if (!isset($this->site->languages[$language])) {
+                throw new \RuntimeException("{$source}: language \"{$code}\" is not configured in config/app.php.");
+            }
+            $folders[$folder] ??= [$slug, $draft, $month, []];
+            $folders[$folder][3][$language] = basename($source);
         }
-        ksort($files);
+        ksort($folders);
+        foreach ($folders as &$folder) {
+            // Default language first, then the others in configured order.
+            $order = array_flip(array_keys($this->site->languages));
+            $order[$this->site->defaultLanguage] = -1;
+            uksort($folder[3], static fn (string $a, string $b) => $order[$a] <=> $order[$b]);
+        }
+        unset($folder);
 
-        return $files;
+        return $folders;
     }
 
     /** @return list<string> publishable files in a post folder (and its subfolders), relative to it */

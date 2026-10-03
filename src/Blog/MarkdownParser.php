@@ -20,7 +20,7 @@ use League\CommonMark\MarkdownConverter;
  *
  *   ---
  *   title: Hello world        (required)
- *   date: 2026-10-01          (required for published posts; optional for drafts)
+ *   date: 2026-10-01          (required for published posts; optional for drafts and translations)
  *   updated: 2026-10-05       (optional, last significant change)
  *   image: cover.jpg          (optional share image: a file in the post folder, a /path in public/ or an https URL)
  *   summary: Optional teaser  (defaults to the first paragraph)
@@ -28,12 +28,14 @@ use League\CommonMark\MarkdownConverter;
  *   ---
  *
  * The slug is the post's folder name and drafts are the posts in content/blog/drafts/ (see Blog).
+ * index.md is the default language; index.<code>.md a translation, whose omitted date, updated,
+ * image and tags are inherited from index.md.
  * Relative links and images (`![Cover](cover.jpg)`) point at files in the post folder: they are
  * rewritten to the post's public asset URL, and a missing file is an error.
  *
  * This only runs when the blog cache is built, never on a cached production request.
  *
- * @phpstan-type Post array{slug: string, title: string, date: string, updated: ?string, image: ?string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, source: string, assets: list<string>}
+ * @phpstan-type Post array{slug: string, language: string, title: string, date: string, updated: ?string, image: ?string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, source: string, assets: list<string>}
  */
 final class MarkdownParser
 {
@@ -78,11 +80,13 @@ final class MarkdownParser
     /**
      * @param string $path     the post's index.md
      * @param string $source   path shown in error messages, e.g. "2026/09/hello-starlite/index.md"
-     * @param string $assetUrl public URL of the post folder's files, e.g. "/media/blog/hello-starlite"
+     * @param string    $assetUrl public URL of the post folder's files, e.g. "/media/blog/hello-starlite"
+     * @param Post|null $original the default-language version, for a translation: date, updated,
+     *                            image and tags it omits are inherited from there
      *
      * @return Post
      */
-    public function parseFile(string $path, string $slug, bool $draft, string $source, string $assetUrl): array
+    public function parseFile(string $path, string $slug, string $language, bool $draft, string $source, string $assetUrl, ?array $original = null): array
     {
         $markdown = file_get_contents($path);
         if ($markdown === false) {
@@ -113,21 +117,28 @@ final class MarkdownParser
 
         $html = $result->getContent();
         $text = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $words = $text === '' ? 0 : count(preg_split('/\s+/u', $text)); // str_word_count() splits accented words
 
         return [
             'slug' => $slug,
+            'language' => $language,
             'title' => trim($title),
-            // A draft without a date sorts as if published today.
-            'date' => $draft && !isset($meta['date']) ? gmdate('Y-m-d') : self::date($meta['date'] ?? null, $source),
-            'updated' => isset($meta['updated']) ? self::date($meta['updated'], $source) : null,
-            'image' => self::image($meta['image'] ?? null, dirname($path), $assetUrl, $source),
+            'date' => match (true) {
+                isset($meta['date']) => self::date($meta['date'], $source),
+                $original !== null => $original['date'],
+                $draft => gmdate('Y-m-d'), // a draft without a date sorts as if published today
+                default => self::date(null, $source),
+            },
+            'updated' => isset($meta['updated']) ? self::date($meta['updated'], $source) : $original['updated'] ?? null,
+            'image' => array_key_exists('image', $meta)
+                ? self::image($meta['image'], dirname($path), $assetUrl, $source)
+                : $original['image'] ?? null,
             'summary' => is_string($meta['summary'] ?? null) ? trim($meta['summary']) : self::firstParagraph($html),
-            'tags' => array_values(array_unique(array_map(
-                static fn ($tag) => strtolower(trim((string) $tag)),
-                (array) ($meta['tags'] ?? []),
-            ))),
+            'tags' => array_key_exists('tags', $meta)
+                ? array_values(array_unique(array_map(static fn ($tag) => strtolower(trim((string) $tag)), (array) $meta['tags'])))
+                : $original['tags'] ?? [],
             'draft' => $draft,
-            'reading_minutes' => max(1, (int) ceil(str_word_count($text) / 220)),
+            'reading_minutes' => max(1, (int) ceil($words / 220)),
             'html' => $html,
             'source' => $source,
             'assets' => [],
