@@ -1,0 +1,2 @@
+{% extends '_layout.twig' %}
+{% block content %}{% for post in result.posts %}<article><a href="{{ path('blog_post', {slug: post.slug}) }}">{{ post.title }}</a></article>{% endfor %}{% endblock %}

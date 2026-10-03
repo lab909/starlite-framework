@@ -41,7 +41,7 @@ final class MarkdownParser
 {
     private readonly MarkdownConverter $converter;
 
-    /** Post being converted, used by the link rewriter: [folder on disk, public asset URL, source]. */
+    /** @var array{string, string, string}|null post being converted, for the link rewriter: [folder on disk, public asset URL, source] */
     private ?array $current = null;
 
     public function __construct()
@@ -117,7 +117,7 @@ final class MarkdownParser
 
         $html = $result->getContent();
         $text = trim(html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-        $words = $text === '' ? 0 : count(preg_split('/\s+/u', $text)); // str_word_count() splits accented words
+        $words = $text === '' ? 0 : count(preg_split('/\s+/u', $text) ?: []); // str_word_count() splits accented words
 
         return [
             'slug' => $slug,

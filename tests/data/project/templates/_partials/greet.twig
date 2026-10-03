@@ -1,0 +1,2 @@
+{% apply patch_elements %}<p id="greeting">{{ 'Hello {name}'|t({name: who}) }}, {{ signals.mood ?? 'no mood' }}</p>{% endapply %}
+{% do patch_signals({greeted: true}) %}

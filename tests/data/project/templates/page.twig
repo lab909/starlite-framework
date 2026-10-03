@@ -1,0 +1,5 @@
+{% extends '_layout.twig' %}
+{% block content %}<h1>{{ heading }}</h1><p id="global">{{ fixture_global }}</p><p id="link">{{ path('about') }}</p>
+<button data-on:click="{{ datastar.get('_partials/greet', {who: 'Ada'}) }}">greet</button>
+<p id="count">{{ '{count} posts'|t({count: 3}) }}</p>
+{% endblock %}

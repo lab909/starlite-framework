@@ -9,20 +9,27 @@ use Starlite\Cache;
 use Starlite\Kernel;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\ArrayInput;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Production build. Run it after every code, template or content change:
+ * Production build: a list of named steps, run in order. Run it after every code, template or content
+ * change. `--list-steps` shows them; `--skip=name,name` leaves some out; the app adds its own with
+ * $app->addDeployStep() in config/bootstrap.php.
  *
- *   1. (optional) npm run build
- *   2. composer dump-autoload --optimize --classmap-authoritative
- *   3. Rebuild var/cache (compiled routes, Twig templates, blog posts, Vite manifest) and copy
- *      the blog posts' images and files to public/media/blog/
- *   4. Refresh the web server's Opcache (the CLI has its own, so it cannot do this by itself),
- *      depending on --opcache / APP_OPCACHE:
+ *   assets        (only with --assets) npm run build
+ *   composer      composer dump-autoload --optimize --classmap-authoritative
+ *   cache         empty var/cache
+ *   routes        compile the router
+ *   blog          compile the posts and copy their files to public/media/blog/
+ *   translations  compile the translation catalogues
+ *   templates     compile every Twig template
+ *   vite          cache the Vite manifest
+ *   opcache       refresh the web server's Opcache (the CLI has its own, so it cannot do this by
+ *                 itself), depending on --opcache / APP_OPCACHE:
  *        cachetool  invalidate this project's scripts in PHP-FPM, then precompile them over its
  *                   FastCGI socket (https://github.com/gordalina/cachetool)
  *        reload     run a command that clears Opcache, e.g. `sudo systemctl reload php8.4-fpm`
@@ -34,7 +41,8 @@ final class DeployCommand extends Command
 {
     private const OPCACHE_MODES = ['cachetool', 'reload', 'none'];
 
-    public function __construct(private readonly string $root)
+    /** @param (\Closure(?bool): Kernel)|null $boot shared kernel factory from Starlite\Console\Console */
+    public function __construct(private readonly string $root, private readonly ?\Closure $boot = null)
     {
         parent::__construct();
     }
@@ -49,14 +57,15 @@ final class DeployCommand extends Command
             ->addOption('assets', null, InputOption::VALUE_NONE, 'Run `npm run build` first')
             ->addOption('composer', null, InputOption::VALUE_REQUIRED, 'Composer binary', 'composer')
             ->addOption('no-dev', null, InputOption::VALUE_NONE, 'Exclude require-dev packages from the autoloader')
-            ->addOption('skip-composer', null, InputOption::VALUE_NONE, 'Do not optimize the Composer autoloader')
+            ->addOption('skip', null, InputOption::VALUE_REQUIRED, 'Comma-separated steps to leave out (see --list-steps)', '')
+            ->addOption('list-steps', null, InputOption::VALUE_NONE, 'Show the steps in order, including the app\'s, and exit')
+            ->addOption('skip-composer', null, InputOption::VALUE_NONE, 'Same as --skip=composer')
             ->addOption('skip-opcache', null, InputOption::VALUE_NONE, 'Same as --opcache=none');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
         $io = new SymfonyStyle($input, $output);
-        $io->title('Starlite deploy');
 
         // Validate the Opcache settings before changing anything.
         $opcache = $input->getOption('skip-opcache') ? 'none' : (string) $input->getOption('opcache');
@@ -72,60 +81,151 @@ final class DeployCommand extends Command
             return Command::INVALID;
         }
 
-        if ($input->getOption('assets')) {
-            $io->section('Building assets');
-            if (!$this->exec('npm run build', $io)) {
-                return Command::FAILURE;
-            }
-        }
+        // Booted first (in production mode) so config/bootstrap.php can add its steps.
+        $app = $this->boot !== null ? ($this->boot)(false) : Kernel::boot($this->root, debug: false);
+        if ($app->debug) {
+            $io->error('The kernel was already booted in debug mode; run deploy on its own.');
 
-        if (!$input->getOption('skip-composer')) {
-            $io->section('Optimizing Composer autoloader');
-            $command = escapeshellarg((string) $input->getOption('composer'))
-                . ' dump-autoload --optimize --classmap-authoritative --no-interaction'
-                . ($input->getOption('no-dev') ? ' --no-dev' : '');
-            if (!$this->exec($command, $io)) {
-                return Command::FAILURE;
-            }
-        }
-
-        $io->section('Rebuilding var/cache');
-        $app = Kernel::boot($this->root, debug: false);
-        Cache::clear($app->cacheDir);
-
-        $app->router->warmup();
-        $io->writeln(sprintf(' ✔ %d routes compiled', count($app->router->routes())));
-
-        [$posts, $versions] = $app->blog->warmup();
-        $io->writeln(sprintf(' ✔ %d blog posts compiled (%d language versions)', $posts, $versions));
-        $io->writeln(sprintf(' ✔ %d post files published to public%s/', $app->blog->publishAssets($this->root . '/public'), Blog::ASSET_URL));
-
-        $io->writeln(sprintf(' ✔ translations compiled for %d languages', $app->translations->warmup()));
-
-        $templates = $this->compileTemplates($app);
-        $io->writeln(sprintf(' ✔ %d Twig templates compiled', $templates));
-
-        if ($app->vite->warmup()) {
-            $io->writeln(' ✔ Vite manifest cached');
-        } else {
-            $io->warning('public/build/.vite/manifest.json is missing: run `npm run build` (or pass --assets).');
-        }
-
-        $ok = match ($opcache) {
-            'cachetool' => $this->refreshWithCachetool($input, $app->cacheDir, $io),
-            'reload' => $this->refreshWithReload($reloadCommand, $io),
-            'none' => true,
-        };
-        if (!$ok) {
             return Command::FAILURE;
         }
-        if ($opcache === 'none') {
+        try {
+            $steps = $this->steps($app, $input, $output, $opcache, $reloadCommand);
+        } catch (\InvalidArgumentException $e) {
+            $io->error($e->getMessage());
+
+            return Command::INVALID;
+        }
+
+        $skip = array_filter(array_map('trim', explode(',', (string) $input->getOption('skip'))));
+        if ($input->getOption('skip-composer')) {
+            $skip[] = 'composer';
+        }
+        if ($unknown = array_diff($skip, array_keys($steps))) {
+            $io->error(sprintf('Unknown step(s) in --skip: %s. Steps: %s.', implode(', ', $unknown), implode(', ', array_keys($steps))));
+
+            return Command::INVALID;
+        }
+
+        if ($input->getOption('list-steps')) {
+            $io->table(['Step', 'What it does'], array_map(
+                static fn (string $name, array $step) => [$name . (in_array($name, $skip, true) ? ' (skipped)' : ''), $step['description']],
+                array_keys($steps),
+                $steps,
+            ));
+
+            return Command::SUCCESS;
+        }
+
+        $io->title('Starlite deploy');
+        foreach ($steps as $name => $step) {
+            if (in_array($name, $skip, true)) {
+                continue;
+            }
+            if ($step['run']() === false) {
+                $io->error("Deploy stopped at step \"{$name}\".");
+
+                return Command::FAILURE;
+            }
+        }
+        if ($opcache === 'none' && !in_array('opcache', $skip, true)) {
             $io->note('Opcache was not refreshed. With opcache.validate_timestamps=0, reload PHP yourself.');
         }
 
         $io->success('Deployed.');
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * The built-in steps, with the app's steps (Kernel::addDeployStep) inserted where they asked.
+     *
+     * @return array<string, array{description: string, run: \Closure(): mixed}> run() returning false stops the deploy
+     */
+    private function steps(Kernel $app, InputInterface $input, OutputInterface $output, string $opcache, string $reloadCommand): array
+    {
+        $io = new SymfonyStyle($input, $output);
+        $steps = [];
+        if ($input->getOption('assets')) {
+            $steps['assets'] = ['description' => 'npm run build', 'run' => function () use ($io) {
+                $io->section('Building assets');
+
+                return $this->exec('npm run build', $io);
+            }];
+        }
+        $steps['composer'] = ['description' => 'Optimize the Composer autoloader (authoritative class map)', 'run' => function () use ($io, $input) {
+            $io->section('Optimizing Composer autoloader');
+
+            return $this->exec(
+                escapeshellarg((string) $input->getOption('composer'))
+                . ' dump-autoload --optimize --classmap-authoritative --no-interaction'
+                . ($input->getOption('no-dev') ? ' --no-dev' : ''),
+                $io,
+            );
+        }];
+        $steps['cache'] = ['description' => 'Empty var/cache', 'run' => static function () use ($io, $app) {
+            $io->section('Rebuilding var/cache');
+            Cache::clear($app->cacheDir);
+            // Later steps (including the app's) may write straight into it.
+            if (!is_dir($app->cacheDir) && !mkdir($app->cacheDir, 0775, true) && !is_dir($app->cacheDir)) {
+                throw new \RuntimeException("Cannot create {$app->cacheDir}.");
+            }
+        }];
+        $steps['routes'] = ['description' => 'Compile the routes', 'run' => static function () use ($io, $app) {
+            $app->router->warmup();
+            $io->writeln(sprintf(' ✔ %d routes compiled', count($app->router->routes())));
+        }];
+        $steps['blog'] = ['description' => 'Compile the blog posts and publish their files to public' . Blog::ASSET_URL . '/', 'run' => function () use ($io, $app) {
+            [$posts, $versions] = $app->blog->warmup();
+            $io->writeln(sprintf(' ✔ %d blog posts compiled (%d language versions)', $posts, $versions));
+            $io->writeln(sprintf(' ✔ %d post files published to public%s/', $app->blog->publishAssets($this->root . '/public'), Blog::ASSET_URL));
+        }];
+        $steps['translations'] = ['description' => 'Compile the translation catalogues', 'run' => static function () use ($io, $app) {
+            $io->writeln(sprintf(' ✔ translations compiled for %d languages', $app->translations->warmup()));
+        }];
+        $steps['templates'] = ['description' => 'Compile every Twig template', 'run' => function () use ($io, $app) {
+            $io->writeln(sprintf(' ✔ %d Twig templates compiled', $this->compileTemplates($app)));
+        }];
+        $steps['vite'] = ['description' => 'Cache the Vite manifest', 'run' => static function () use ($io, $app) {
+            if ($app->vite->warmup()) {
+                $io->writeln(' ✔ Vite manifest cached');
+            } else {
+                $io->warning('public/build/.vite/manifest.json is missing: run `npm run build` (or pass --assets).');
+            }
+        }];
+        $steps['opcache'] = ['description' => "Refresh the web server's Opcache ({$opcache})", 'run' => fn () => match ($opcache) {
+            'cachetool' => $this->refreshWithCachetool($input, $app->cacheDir, $io),
+            'reload' => $this->refreshWithReload($reloadCommand, $io),
+            default => true, // 'none' (the mode was validated before any step ran)
+        }];
+
+        foreach ($app->deploySteps() as $custom) {
+            $name = $custom['name'];
+            if (isset($steps[$name])) {
+                throw new \InvalidArgumentException("Deploy step \"{$name}\" already exists.");
+            }
+            $anchor = $custom['before'] ?? $custom['after'] ?? 'opcache';
+            if (!isset($steps[$anchor])) {
+                throw new \InvalidArgumentException("Deploy step \"{$name}\" refers to unknown step \"{$anchor}\". Steps: " . implode(', ', array_keys($steps)) . '.');
+            }
+            $step = $custom['step'];
+            $entry = [
+                'description' => $custom['description'] !== '' ? $custom['description'] : (is_string($step) ? "bin/console {$step}" : 'App step'),
+                'run' => function () use ($step, $name, $app, $io, $output) {
+                    $io->section("App step: {$name}");
+                    if (is_string($step)) {
+                        $console = $this->getApplication() ?? throw new \LogicException('deploy must run inside the console application.');
+
+                        return $console->find($step)->run(new ArrayInput([]), $output) === Command::SUCCESS;
+                    }
+
+                    return $step($app, $io);
+                },
+            ];
+            $position = array_search($anchor, array_keys($steps), true) + ($custom['after'] !== null ? 1 : 0);
+            $steps = array_slice($steps, 0, $position, true) + [$name => $entry] + array_slice($steps, $position, null, true);
+        }
+
+        return $steps;
     }
 
     private function compileTemplates(Kernel $app): int

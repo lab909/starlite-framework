@@ -17,7 +17,8 @@
         "spatie/schema-org": "^5.0",
         "symfony/translation": "^7.4",
         "twig/intl-extra": "^3.10",
-        "symfony/config": "^7.4"
+        "symfony/config": "^7.4",
+        "psr/container": "^2.0"
     },
     "autoload": {
         "psr-4": {

@@ -39,8 +39,9 @@ final class Router
     }
 
     /**
-     * @param list<string>          $methods
-     * @param array<string, string> $requirements e.g. ['slug' => '[a-z0-9-]+']
+     * @param list<string>                                         $methods
+     * @param \Closure|array{class-string, string}|class-string    $handler
+     * @param array<string, string>                                $requirements e.g. ['slug' => '[a-z0-9-]+']
      */
     public function add(
         array $methods,
@@ -75,6 +76,7 @@ final class Router
         return [$handler, $args, $csrf];
     }
 
+    /** @param array<string, mixed> $params */
     public function generate(string $name, array $params = []): string
     {
         return $this->generator()->generate($name, $params);
@@ -112,6 +114,7 @@ final class Router
         );
     }
 
+    /** @return array<mixed> */
     private function cached(string $file): array
     {
         $path = $this->cacheDir . '/' . $file;

@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="{{ site.language }}">
+<head>
+{% block seo %}{% endblock %}
+{{ seo_tags() }}
+</head>
+<body>
+<nav>{% for l in language_switcher() %}<a class="lang{{ l.active ? ' active' }}" href="{{ l.url }}" data-available="{{ l.available ? 'yes' : 'no' }}">{{ l.code }}</a>{% endfor %}</nav>
+{% block content %}{% endblock %}
+</body>
+</html>

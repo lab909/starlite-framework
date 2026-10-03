@@ -16,6 +16,7 @@ use Twig\TwigFunction;
  */
 final class Vite extends AbstractExtension
 {
+    /** @var array<string, array{file: string, imports?: list<string>, css?: list<string>}>|null */
     private ?array $manifest = null;
 
     public function __construct(
@@ -85,7 +86,11 @@ final class Vite extends AbstractExtension
         return preg_match('#^https?://[^\s"\'<>]+$#', $url) ? $url : null;
     }
 
-    /** @return list<string> CSS files of an entry and everything it imports */
+    /**
+     * @param array<string, true> $seen
+     *
+     * @return list<string> CSS files of an entry and everything it imports
+     */
     private function collectCss(string $key, array &$seen = []): array
     {
         if (isset($seen[$key])) {
@@ -101,6 +106,7 @@ final class Vite extends AbstractExtension
         return [...$css, ...($chunk['css'] ?? [])];
     }
 
+    /** @return array<string, array{file: string, imports?: list<string>, css?: list<string>}> */
     private function manifest(): array
     {
         if ($this->manifest !== null) {
@@ -113,6 +119,7 @@ final class Vite extends AbstractExtension
             : Cache::remember($this->cacheDir . '/vite.php', fn () => $this->readManifest($json));
     }
 
+    /** @return array<string, array{file: string, imports?: list<string>, css?: list<string>}> */
     private function readManifest(string $json): array
     {
         if (!is_file($json)) {

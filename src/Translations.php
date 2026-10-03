@@ -48,7 +48,11 @@ final class Translations extends AbstractExtension
         $this->formatter = new IntlFormatter();
     }
 
-    /** Translates into the current language (or the given one). */
+    /**
+     * Translates into the current language (or the given one).
+     *
+     * @param array<string, mixed> $params
+     */
     public function t(string $message, array $params = [], ?string $language = null): string
     {
         $language ??= $this->site->language();

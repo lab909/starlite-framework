@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Starlite;
 
+use starfederation\datastar\events\EventInterface;
 use starfederation\datastar\ServerSentEventGenerator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use Twig\Extension\AbstractExtension;
@@ -26,7 +27,7 @@ use Twig\TwigFunction;
  */
 final class Datastar extends AbstractExtension implements GlobalsInterface
 {
-    /** @var list<\Closure(ServerSentEventGenerator): void> */
+    /** @var list<\Closure(ServerSentEventGenerator): mixed> */
     private array $queue = [];
 
     public function __construct(
@@ -60,32 +61,56 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
 
     // --- Backend actions that render a template -----------------------------
 
+    /**
+     * @param array<string, mixed> $vars
+     * @param array<string, mixed> $options
+     */
     public function get(string $template, array $vars = [], array $options = []): string
     {
         return $this->action('get', $this->templateUrl($template, $vars), $options);
     }
 
+    /**
+     * @param array<string, mixed> $vars
+     * @param array<string, mixed> $options
+     */
     public function post(string $template, array $vars = [], array $options = []): string
     {
         return $this->action('post', $this->templateUrl($template, $vars), $options);
     }
 
+    /**
+     * @param array<string, mixed> $vars
+     * @param array<string, mixed> $options
+     */
     public function put(string $template, array $vars = [], array $options = []): string
     {
         return $this->action('put', $this->templateUrl($template, $vars), $options);
     }
 
+    /**
+     * @param array<string, mixed> $vars
+     * @param array<string, mixed> $options
+     */
     public function patch(string $template, array $vars = [], array $options = []): string
     {
         return $this->action('patch', $this->templateUrl($template, $vars), $options);
     }
 
+    /**
+     * @param array<string, mixed> $vars
+     * @param array<string, mixed> $options
+     */
     public function delete(string $template, array $vars = [], array $options = []): string
     {
         return $this->action('delete', $this->templateUrl($template, $vars), $options);
     }
 
-    /** Any backend action to any URL. CSRF needs no token: the kernel checks the browser's origin headers. */
+    /**
+     * Any backend action to any URL. CSRF needs no token: the kernel checks the browser's origin headers.
+     *
+     * @param array<string, mixed> $options
+     */
     public function action(string $method, string $url, array $options = []): string
     {
         $method = strtolower($method);
@@ -99,6 +124,7 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
 
     // --- Signed, tamper-proof template config -------------------------------
 
+    /** @param array<string, mixed> $vars */
     private function templateUrl(string $template, array $vars): string
     {
         $payload = self::base64url(json_encode(['t' => $template, 'v' => $vars], JSON_THROW_ON_ERROR));
@@ -107,7 +133,7 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return ($this->site?->prefix() ?? '') . $this->endpoint . '?config=' . $payload . '.' . hash_hmac('sha256', $payload, $this->secret);
     }
 
-    /** @return array{0: string, 1: array}|null */
+    /** @return array{0: string, 1: array<string, mixed>}|null */
     public function decode(string $config): ?array
     {
         $dot = strrpos($config, '.');
@@ -133,6 +159,7 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
 
     // --- Queued events (run in template order) ------------------------------
 
+    /** @param array<string, mixed> $options */
     public function patchElements(string $html, array $options = []): string
     {
         $this->queue[] = static fn (ServerSentEventGenerator $sse) => $sse->patchElements($html, $options);
@@ -140,6 +167,10 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return '';
     }
 
+    /**
+     * @param array<string, mixed> $signals
+     * @param array<string, mixed> $options
+     */
     public function patchSignals(array $signals, array $options = []): string
     {
         $this->queue[] = static fn (ServerSentEventGenerator $sse) => $sse->patchSignals($signals, $options);
@@ -147,6 +178,7 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return '';
     }
 
+    /** @param array<string, mixed> $options */
     public function removeElements(string $selector, array $options = []): string
     {
         $this->queue[] = static fn (ServerSentEventGenerator $sse) => $sse->removeElements($selector, $options);
@@ -154,6 +186,7 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return '';
     }
 
+    /** @param array<string, mixed> $options */
     public function executeScript(string $script, array $options = []): string
     {
         $this->queue[] = static fn (ServerSentEventGenerator $sse) => $sse->executeScript($script, $options);
@@ -161,6 +194,7 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return '';
     }
 
+    /** @param array<string, mixed> $options */
     public function location(string $uri, array $options = []): string
     {
         $this->queue[] = static fn (ServerSentEventGenerator $sse) => $sse->location($uri, $options);
@@ -168,8 +202,23 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
         return '';
     }
 
-    /** The queued events (or the whole output, if nothing was queued) as a streamed SSE response. */
+    /** The queued events (or the whole output, if nothing was queued) as an SSE response. */
     public function response(string $output): StreamedResponse
+    {
+        $events = $this->events($output);
+
+        return new StreamedResponse(static function () use ($events): void {
+            ignore_user_abort(false);
+            echo $events;
+            flush();
+        }, 200, ServerSentEventGenerator::headers());
+    }
+
+    /**
+     * The queued events (or the whole output, if nothing was queued) rendered as SSE text. Rendering
+     * up front keeps template errors inside the normal error handling and makes responses testable.
+     */
+    public function events(string $output): string
     {
         $queue = $this->queue;
         $this->queue = [];
@@ -177,11 +226,26 @@ final class Datastar extends AbstractExtension implements GlobalsInterface
             $queue[] = static fn (ServerSentEventGenerator $sse) => $sse->patchElements($output);
         }
 
-        return new StreamedResponse(static function () use ($queue): void {
-            $sse = new ServerSentEventGenerator();
-            foreach ($queue as $event) {
-                $event($sse);
+        // Collects the SDK's event text instead of echoing it (sendEvent() echoes and flushes buffers).
+        $sse = new class() extends ServerSentEventGenerator {
+            public string $output = '';
+
+            public function __construct()
+            {
             }
-        }, 200, ServerSentEventGenerator::headers());
+
+            protected function sendEvent(EventInterface $event): string
+            {
+                $output = $event->getOutput();
+                $this->output .= $output;
+
+                return $output;
+            }
+        };
+        foreach ($queue as $event) {
+            $event($sse);
+        }
+
+        return $sse->output;
     }
 }
