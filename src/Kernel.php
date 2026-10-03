@@ -54,7 +54,7 @@ final class Kernel
             );
         }
 
-        $app = new self($root, $config['secret'], $debug, $config['url'], $config['site']);
+        $app = new self($root, $config['secret'], $debug, $config['url'], $config['site'], $config['blog']['per_page']);
         (require $root . '/config/routes.php')($app);
 
         return $app;
@@ -77,10 +77,11 @@ final class Kernel
         public readonly bool $debug = false,
         string $url = 'http://localhost',
         array $site = ['name' => 'Starlite', 'description' => '', 'locale' => 'en_US', 'image' => null, 'author' => null],
+        int $postsPerPage = 20,
     ) {
         $this->cacheDir = $root . '/var/cache';
         $this->router = new Router($this->cacheDir, $debug);
-        $this->blog = new Blog($root . '/content/blog', $this->cacheDir . '/blog.php', $debug);
+        $this->blog = new Blog($root . '/content/blog', $this->cacheDir . '/blog.php', $debug, $postsPerPage);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->datastar = new Datastar($secret);
         $this->seo = new Seo(rtrim($url, '/'), $site);
@@ -164,10 +165,14 @@ final class Kernel
 
         // Pages are the same for every visitor (no sessions), so caches may store them
         // and revalidate cheaply: an unchanged page is answered with an empty 304.
-        if ($request->isMethodCacheable() && $response->isOk() && !$response instanceof StreamedResponse) {
-            $response->setEtag(hash('xxh128', (string) $response->getContent()));
-            $response->setPublic();
-            $response->headers->addCacheControlDirective('no-cache');
+        // Streamed and file responses have no body in memory (getContent() is false): SSE is never
+        // cached, and files bring their own ETag and Last-Modified.
+        if ($request->isMethodCacheable() && $response->isOk()) {
+            if ($response->getContent() !== false) {
+                $response->setEtag(hash('xxh128', $response->getContent()));
+                $response->setPublic();
+                $response->headers->addCacheControlDirective('no-cache');
+            }
             $response->isNotModified($request);
         }
 

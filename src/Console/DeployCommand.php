@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Starlite\Console;
 
+use Starlite\Blog\Blog;
 use Starlite\Cache;
 use Starlite\Kernel;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -18,7 +19,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *
  *   1. (optional) npm run build
  *   2. composer dump-autoload --optimize --classmap-authoritative
- *   3. Rebuild var/cache: compiled routes, Twig templates, blog posts, Vite manifest
+ *   3. Rebuild var/cache (compiled routes, Twig templates, blog posts, Vite manifest) and copy
+ *      the blog posts' images and files to public/media/blog/
  *   4. Refresh the web server's Opcache (the CLI has its own, so it cannot do this by itself),
  *      depending on --opcache / APP_OPCACHE:
  *        cachetool  invalidate this project's scripts in PHP-FPM, then precompile them over its
@@ -95,6 +97,7 @@ final class DeployCommand extends Command
         $io->writeln(sprintf(' ✔ %d routes compiled', count($app->router->routes())));
 
         $io->writeln(sprintf(' ✔ %d blog posts compiled', $app->blog->warmup()));
+        $io->writeln(sprintf(' ✔ %d post files published to public%s/', $app->blog->publishAssets($this->root . '/public'), Blog::ASSET_URL));
 
         $templates = $this->compileTemplates($app);
         $io->writeln(sprintf(' ✔ %d Twig templates compiled', $templates));
