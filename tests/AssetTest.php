@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Starlite\Tests;
 
-final class AssetTest extends KernelTestCase
+final class AssetTest extends FrameworkTestCase
 {
     public function testServesPostFilesWithTheirContentType(): void
     {

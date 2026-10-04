@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         cacheDirectory="var/phpunit"
+         colors="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         displayDetailsOnTestsThatTriggerWarnings="true"
+         beStrictAboutOutputDuringTests="true">
+    <testsuites>
+        <!-- Starlite itself, against a fixture project (tests/data/project) and fixture content. -->
+        <testsuite name="framework">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+    <php>
+        <env name="APP_SECRET" value="test-secret-0123456789abcdef" force="true"/>
+        <env name="APP_URL" value="https://example.test" force="true"/>
+        <env name="APP_DEBUG" value="0" force="true"/>
+        <ini name="error_log" value="var/phpunit/error.log"/>
+    </php>
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+</phpunit>

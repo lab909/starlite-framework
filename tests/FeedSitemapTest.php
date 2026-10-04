@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Starlite\Tests;
 
-final class FeedSitemapTest extends KernelTestCase
+final class FeedSitemapTest extends FrameworkTestCase
 {
     public function testFeedListsPublishedPostsOfTheCurrentLanguage(): void
     {

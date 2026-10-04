@@ -1,0 +1,10 @@
+# Level 8 checks types, nullability and array shapes; level 9's strict `mixed` rules mostly flag
+# SPL iterators and console options, so they would add annotations without catching real bugs.
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    excludePaths:
+        - tests/data/*
+    tmpDir: var/phpstan

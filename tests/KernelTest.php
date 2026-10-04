@@ -6,7 +6,7 @@ namespace Starlite\Tests;
 
 use Psr\Container\NotFoundExceptionInterface;
 
-final class KernelTest extends KernelTestCase
+final class KernelTest extends FrameworkTestCase
 {
     public function testDispatchesClosuresControllerMethodsAndInvokableControllers(): void
     {

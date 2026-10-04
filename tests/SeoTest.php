@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Starlite\Tests;
 
-final class SeoTest extends KernelTestCase
+final class SeoTest extends FrameworkTestCase
 {
     public function testPageGetsTitleCanonicalOpenGraphAndTwitterTags(): void
     {

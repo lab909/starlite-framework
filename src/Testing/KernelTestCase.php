@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Starlite\Tests;
+namespace Starlite\Testing;
 
 use PHPUnit\Framework\TestCase;
 use Starlite\Kernel;
@@ -11,15 +11,23 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Boots the fixture project (lib/tests/data/project) with the fixture content
- * (lib/tests/data/content) and a throw-away cache directory, and drives it through
- * Kernel::handle(), so no web server is needed.
+ * Base class for tests that drive a Starlite app through Kernel::handle(), so no web server is
+ * needed: boot the app, send requests, read any response body (including Datastar streams), and
+ * use throw-away directories.
+ *
+ *   final class AboutTest extends KernelTestCase
+ *   {
+ *       public function testAbout(): void
+ *       {
+ *           $app = $this->bootKernel(dirname(__DIR__), overrides: ['content_dir' => __DIR__ . '/data/content']);
+ *           self::assertSame(200, $this->request($app, '/about')->getStatusCode());
+ *       }
+ *   }
+ *
+ * Needs phpunit/phpunit (a dev dependency of the app).
  */
 abstract class KernelTestCase extends TestCase
 {
-    protected const PROJECT = __DIR__ . '/data/project';
-    protected const CONTENT = __DIR__ . '/data/content';
-
     /** @var list<string> */
     private array $tempDirs = [];
 
@@ -31,13 +39,14 @@ abstract class KernelTestCase extends TestCase
         $this->tempDirs = [];
     }
 
-    /** @param array<string, mixed> $overrides merged over the fixture's config/app.php */
-    protected function kernel(bool $debug = true, array $overrides = [], string $root = self::PROJECT): Kernel
+    /**
+     * Boots the app at $root with a throw-away cache directory.
+     *
+     * @param array<string, mixed> $overrides merged over the app's config/app.php
+     */
+    protected function bootKernel(string $root, bool $debug = true, array $overrides = []): Kernel
     {
-        return Kernel::boot($root, $debug, array_replace_recursive([
-            'content_dir' => self::CONTENT,
-            'cache_dir' => $this->tempDir('cache'),
-        ], $overrides));
+        return Kernel::boot($root, $debug, array_replace_recursive(['cache_dir' => $this->tempDir('cache')], $overrides));
     }
 
     /** @param array<string, string> $headers e.g. ['Sec-Fetch-Site' => 'same-origin'] */

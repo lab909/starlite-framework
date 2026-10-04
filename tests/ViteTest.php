@@ -6,7 +6,7 @@ namespace Starlite\Tests;
 
 use Starlite\Vite;
 
-final class ViteTest extends KernelTestCase
+final class ViteTest extends FrameworkTestCase
 {
     private function root(): string
     {

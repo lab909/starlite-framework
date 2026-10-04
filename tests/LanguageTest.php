@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Starlite\Tests;
 
-final class LanguageTest extends KernelTestCase
+final class LanguageTest extends FrameworkTestCase
 {
     public function testSecondaryLanguageIsServedUnderItsPrefix(): void
     {

@@ -6,7 +6,7 @@ namespace Starlite\Tests;
 
 use PHPUnit\Framework\Attributes\DataProvider;
 
-final class CsrfTest extends KernelTestCase
+final class CsrfTest extends FrameworkTestCase
 {
     /** @return iterable<string, array{array<string, string>, int}> */
     public static function requests(): iterable

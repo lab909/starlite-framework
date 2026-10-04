@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Starlite\Blog\Blog;
 use Starlite\Site;
 
-final class BlogTest extends KernelTestCase
+final class BlogTest extends FrameworkTestCase
 {
     private function site(string $default = 'en'): Site
     {

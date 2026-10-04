@@ -11,7 +11,7 @@ use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
-final class ConsoleTest extends KernelTestCase
+final class ConsoleTest extends FrameworkTestCase
 {
     private const COMMANDS = __DIR__ . '/Fixtures/Command';
     private const NAMESPACE = 'Starlite\\Tests\\Fixtures\\Command\\';

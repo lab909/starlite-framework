@@ -1,28 +1,70 @@
 {
     "name": "starlite/framework",
-    "description": "Starlite core: a tiny, database-free PHP micro framework (Datastar, Symfony Routing, Twig, Markdown, Vite), compiled for Opcache.",
+    "description": "Starlite: a tiny, database-free PHP micro framework for static-like dynamic sites (Datastar, Symfony Routing, Twig, Markdown blog, translations, SEO), compiled for Opcache.",
     "type": "library",
+    "keywords": [
+        "framework",
+        "datastar",
+        "twig",
+        "static",
+        "markdown",
+        "blog",
+        "opcache"
+    ],
+    "homepage": "https://lab909.github.io/starlite-framework-docs/",
+    "support": {
+        "docs": "https://lab909.github.io/starlite-framework-docs/",
+        "source": "https://github.com/lab909/starlite-framework",
+        "issues": "https://github.com/lab909/starlite-framework/issues"
+    },
     "require": {
         "php": ">=8.4",
         "league/commonmark": "^2.8",
+        "psr/container": "^2.0",
+        "spatie/schema-org": "^5.0",
         "starfederation/datastar-php": "^1.0",
+        "symfony/config": "^7.4",
         "symfony/console": "^7.4",
         "symfony/dotenv": "^7.4",
-        "symfony/routing": "^7.4",
-        "symfony/yaml": "^7.4",
-        "twig/twig": "^3.10",
-        "symfony/http-foundation": "^7.4",
-        "symfony/security-csrf": "^7.4",
         "symfony/error-handler": "^7.4",
-        "spatie/schema-org": "^5.0",
+        "symfony/http-foundation": "^7.4",
+        "symfony/routing": "^7.4",
+        "symfony/security-csrf": "^7.4",
         "symfony/translation": "^7.4",
+        "symfony/yaml": "^7.4",
         "twig/intl-extra": "^3.10",
-        "symfony/config": "^7.4",
-        "psr/container": "^2.0"
+        "twig/twig": "^3.10"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^12.0"
+    },
+    "suggest": {
+        "phpunit/phpunit": "For Starlite\\Testing\\KernelTestCase in your app's tests"
     },
     "autoload": {
         "psr-4": {
             "Starlite\\": "src/"
         }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Starlite\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.x-dev"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.4.0"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "analyse": "phpstan analyse --memory-limit=1G"
     }
 }

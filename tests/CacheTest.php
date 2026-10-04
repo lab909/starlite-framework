@@ -6,7 +6,7 @@ namespace Starlite\Tests;
 
 use Starlite\Cache;
 
-final class CacheTest extends KernelTestCase
+final class CacheTest extends FrameworkTestCase
 {
     public function testRememberBuildsOnceThenReadsTheFile(): void
     {

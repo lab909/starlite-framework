@@ -1,0 +1,48 @@
+# Starlite framework
+
+The core of [Starlite](https://lab909.github.io/starlite-framework-docs/): a tiny, database-free PHP
+micro framework for static-like dynamic sites. Datastar for reactivity, Symfony Routing, Twig, a
+Markdown blog with translations, SEO (Open Graph, JSON-LD, hreflang, sitemap, feeds) and Vite,
+all compiled ahead of time for Opcache.
+
+**This is the framework package (`starlite/framework`). To build a site, start from the skeleton:
+[lab909/starlite](https://github.com/lab909/starlite).**
+
+📖 **Documentation:** https://lab909.github.io/starlite-framework-docs/
+
+## Installation
+
+The package isn't on Packagist; sites install it from this repository:
+
+```json
+{
+    "repositories": [{ "type": "vcs", "url": "https://github.com/lab909/starlite-framework" }],
+    "require": { "starlite/framework": "^1.0@dev" }
+}
+```
+
+The skeleton already contains this. Update a site with `composer update starlite/framework`.
+
+## What's inside
+
+```
+src/                 Kernel, Router, Controller, Datastar, Vite, Site, Translations, Cache, Container
+src/Blog/            the Markdown blog: compiler, post SEO, feed, asset serving
+src/Seo/             page metadata, sitemap, robots.txt
+src/Console/         bin/console: deploy, cache:clear, command discovery
+src/Testing/         KernelTestCase, the base class for app tests
+resources/vite/      Starlite's Vite plugin
+tests/               the framework's test suite, with a fixture project and content
+```
+
+## Development
+
+```sh
+composer update
+composer test        # PHPUnit
+composer analyse     # PHPStan, level 8
+```
+
+To work on the framework inside a site, clone this repository into the site's `packages/starlite/`
+(gitignored) and run `composer update starlite/framework`: Composer then symlinks your clone instead
+of installing from GitHub. See the skeleton's `CONTRIBUTING.md`.

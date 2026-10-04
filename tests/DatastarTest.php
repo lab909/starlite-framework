@@ -6,7 +6,7 @@ namespace Starlite\Tests;
 
 use Starlite\Kernel;
 
-final class DatastarTest extends KernelTestCase
+final class DatastarTest extends FrameworkTestCase
 {
     public function testSignedTemplateUrlRendersThePartialAsServerSentEvents(): void
     {

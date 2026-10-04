@@ -6,7 +6,7 @@ namespace Starlite\Tests;
 
 use Symfony\Component\HttpFoundation\Request;
 
-final class TranslationsTest extends KernelTestCase
+final class TranslationsTest extends FrameworkTestCase
 {
     public function testTranslatesIntoTheCurrentLanguage(): void
     {
