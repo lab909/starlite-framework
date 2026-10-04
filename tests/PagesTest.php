@@ -65,6 +65,45 @@ final class PagesTest extends FrameworkTestCase
         self::assertSame(['a', 'a/z', 'b', 'contact', 'legal', 'legal/privacy'], array_column($app->pages()->all(), 'path'));
     }
 
+    public function testTranslatedSlugsGiveEachLanguageItsOwnUrl(): void
+    {
+        $app = $this->withPages([
+            'company/index.md' => "---\ntitle: About\n---\n",
+            'company/index.it.md' => "---\ntitle: Azienda\nslug: azienda\n---\n",
+            'company/team/index.md' => "---\ntitle: Team\n---\n",
+            'company/team/index.it.md' => "---\ntitle: Squadra\nslug: squadra\n---\n",
+            'company/history/index.md' => "---\ntitle: History\n---\n",
+            'company/history/index.it.md' => "---\ntitle: Storia\n---\n",
+            'shop/index.md' => "---\ntitle: Shop\n---\n",
+            'shop/gifts/index.it.md' => "---\ntitle: Regali\nslug: regali\n---\n",
+        ]);
+
+        $it = $app->pages()->language('it');
+        self::assertSame(
+            ['company' => 'azienda', 'company/history' => 'azienda/history', 'company/team' => 'azienda/squadra', 'shop/gifts' => 'shop/regali'],
+            array_column(array_filter($it->all(), static fn (array $page) => !in_array($page['path'], ['contact', 'legal', 'chi-siamo'], true)), 'uri', 'path'),
+            'parents\' translated slugs combine; an untranslated segment keeps its folder name',
+        );
+        self::assertSame('company/team', $app->pages()->where('uri', 'company/team')->one()['path'] ?? null, 'English uri is the folder path');
+
+        // path() takes the identity (folder path) and writes each language's URL.
+        self::assertSame('/it/azienda/squadra', $app->path('page', ['path' => 'company/team'], 'it'));
+        self::assertSame('/company/team', $app->path('page', ['path' => 'company/team'], 'en'));
+
+        $html = $this->body($this->request($app, '/it/azienda/squadra'));
+        self::assertStringContainsString('<h1>Squadra</h1>', $html);
+        self::assertStringContainsString('hreflang="en" href="https://example.test/company/team"', $html, 'alternates link each version to its own URL');
+        self::assertStringContainsString('<link rel="canonical" href="https://example.test/it/azienda/squadra">', $html);
+
+        // The untranslated URL moved: a permanent redirect, not a 404.
+        $moved = $this->request($app, '/it/company/team');
+        self::assertSame(301, $moved->getStatusCode());
+        self::assertSame('/it/azienda/squadra', $moved->headers->get('Location'));
+        self::assertSame(404, $this->request($app, '/azienda')->getStatusCode(), 'the Italian URL is not an English one');
+
+        self::assertStringContainsString('<loc>https://example.test/it/azienda/squadra</loc>', $this->body($this->request($app, '/sitemap.xml')));
+    }
+
     public function testPagesRenderWithTheirTemplateAndSeo(): void
     {
         $app = $this->kernel();
@@ -145,6 +184,10 @@ final class PagesTest extends FrameworkTestCase
         $app = $this->withPages(['about/index.md' => "---\ntitle: About\n---\n"]);
 
         self::assertSame(['about' => 'about'], $app->shadowedPages());
+
+        // A translated slug can collide with a route too: /it/json is answered by the fixture's json route.
+        $translated = $this->withPages(['x/index.md' => "---\ntitle: X\n---\n", 'x/index.it.md' => "---\ntitle: X\nslug: json\n---\n"]);
+        self::assertSame(['json' => 'json'], $translated->shadowedPages());
         self::assertSame([], $this->kernel()->shadowedPages());
     }
 
@@ -169,7 +212,7 @@ final class PagesTest extends FrameworkTestCase
         yield 'invalid yaml' => [['x/index.md' => "---\ntitle: X\nsummary: Note: this breaks\n---\n"], 'pages/x/index.md: invalid YAML front matter:'];
         yield 'no front matter' => [['x/index.md' => 'Just text'], 'pages/x/index.md: missing YAML front matter'];
         yield 'missing title' => [['x/index.md' => "---\nsummary: S\n---\n"], 'pages/x/index.md: front matter needs a "title"'];
-        yield 'unknown key' => [['x/index.md' => "---\ntitle: X\ncolour: red\n---\n"], 'unknown front matter "colour" (title, summary, image, template, order, updated, data; put anything else under "data")'];
+        yield 'unknown key' => [['x/index.md' => "---\ntitle: X\ncolour: red\n---\n"], 'unknown front matter "colour" (title, summary, image, template, order, updated, data, slug; put anything else under "data")'];
         yield 'bad template' => [['x/index.md' => "---\ntitle: X\ntemplate: ../secret.twig\n---\n"], '"template" must be a template path such as pages/contact.twig'];
         yield 'order' => [['x/index.md' => "---\ntitle: X\norder: first\n---\n"], '"order" must be a whole number'];
         yield 'data' => [['x/index.md' => "---\ntitle: X\ndata: text\n---\n"], '"data" must be a mapping'];
@@ -177,6 +220,9 @@ final class PagesTest extends FrameworkTestCase
         yield 'language' => [['x/index.fr.md' => "---\ntitle: X\n---\n"], 'pages/x/index.fr.md: language "fr" is not configured'];
         yield 'default code' => [['x/index.en.md' => "---\ntitle: X\n---\n"], 'pages/x/index.en.md: the default language (en) is index.md'];
         yield 'missing file' => [['x/index.md' => "---\ntitle: X\n---\n![a](nope.png)"], 'pages/x/index.md: "nope.png" not found in its folder'];
+        yield 'slug in the default language' => [['x/index.md' => "---\ntitle: X\nslug: y\n---\n"], 'pages/x/index.md: "slug" is only for translations'];
+        yield 'invalid slug' => [['x/index.md' => "---\ntitle: X\n---\n", 'x/index.it.md' => "---\ntitle: X\nslug: a/b\n---\n"], '"slug" uses lowercase letters, digits and dashes (one URL segment)'];
+        yield 'duplicate url' => [['x/index.md' => "---\ntitle: X\n---\n", 'x/index.it.md' => "---\ntitle: X\nslug: contact\n---\n"], '/contact is already the URL of pages/'];
         yield 'file name' => [['x/index.md' => "---\ntitle: X\n---\n", 'x/bad name.png' => 'x'], 'file names may only use letters, digits, dots, dashes and underscores'];
     }
 

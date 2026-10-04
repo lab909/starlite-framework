@@ -186,8 +186,8 @@ final class DeployCommand extends Command
             [$pages, $versions] = $app->pages->warmup();
             $shadowed = $app->shadowedPages();
             if ($shadowed !== []) {
-                foreach ($shadowed as $path => $route) {
-                    $io->error("content/pages/{$path}/ can never be shown: the route \"{$route}\" answers /{$path} first. Rename the folder or the route.");
+                foreach ($shadowed as $uri => $route) {
+                    $io->error("The content page at /{$uri} can never be shown: the route \"{$route}\" answers it first. Rename the page's folder (or its translated slug) or the route.");
                 }
 
                 return false;

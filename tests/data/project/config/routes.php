@@ -14,6 +14,7 @@ use Starlite\Seo\RobotsController;
 use Starlite\Seo\SitemapController;
 use Starlite\Tests\Fixtures\Controller\DemoController;
 use Starlite\Tests\Fixtures\Controller\InvokableController;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 
 return static function (Kernel $app): void {
     $app->get('/', static fn () => $app->render('page.twig', ['heading' => $app->t('Welcome')]), 'home');
@@ -30,15 +31,20 @@ return static function (Kernel $app): void {
     $app->get('/blog', static fn () => $app->render('list.twig', ['result' => $app->posts()->paginate(1)]), 'blog');
     $app->get('/blog/feed.xml', FeedController::class, 'blog_feed');
     $app->get('/blog/{slug}', static function (string $slug) use ($app) {
-        $alternates = [];
-        foreach ($app->blog->translations($slug) as $language) {
-            $alternates[$language] = $app->path('blog_post', ['slug' => $slug], $language);
-        }
-        $app->site->setAlternates($alternates);
-        $post = $app->posts()->slug($slug)->one();
+        $post = $app->posts()->where('uri', $slug)->one();
         if ($post === null) {
+            $moved = $app->posts()->slug($slug)->one(); // reached by its folder name, but translated: it moved
+            if ($moved !== null) {
+                return new RedirectResponse($app->path('blog_post', ['slug' => $moved['slug']]), 301);
+            }
+
             return $app->error(404, 'Post not found.');
         }
+        $alternates = [];
+        foreach ($app->blog->translations($post['slug']) as $language) {
+            $alternates[$language] = $app->path('blog_post', ['slug' => $post['slug']], $language);
+        }
+        $app->site->setAlternates($alternates);
         PostSeo::apply($app->seo, $post);
 
         return $app->render('post.twig', ['post' => $post]);
@@ -51,15 +57,21 @@ return static function (Kernel $app): void {
     // Content pages, built like an app's PageController. The catch-all comes last: other routes win.
     $app->get(Pages::ASSET_URL . '/{file}', PageAssetController::class, 'page_asset', ['file' => '.+']);
     $app->get('/{path}', static function (string $path) use ($app) {
-        $alternates = [];
-        foreach ($app->pages->translations($path) as $language) {
-            $alternates[$language] = $app->path('page', ['path' => $path], $language);
-        }
-        $app->site->setAlternates($alternates);
-        $page = $app->pages()->where('path', $path)->one();
+        $page = $app->pages()->where('uri', $path)->one();
         if ($page === null) {
+            // A translated page reached by its folder path (/it/about for /it/chi-siamo): it moved.
+            $moved = $app->pages()->where('path', $path)->one();
+            if ($moved !== null) {
+                return new RedirectResponse($app->path('page', ['path' => $moved['path']]), 301);
+            }
+
             return $app->error(404, $app->t('Not found.')); // also every unknown URL: the same 404 as without pages
         }
+        $alternates = [];
+        foreach ($app->pages->translations($page['path']) as $language) {
+            $alternates[$language] = $app->path('page', ['path' => $page['path']], $language);
+        }
+        $app->site->setAlternates($alternates);
         PageSeo::apply($app->seo, $page);
 
         return $app->render($page['template'] ?? 'content-page.twig', ['page' => $page]);

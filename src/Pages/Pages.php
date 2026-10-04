@@ -28,13 +28,17 @@ use Starlite\Site;
  *   order: 2                    (optional: for menus, `pages().orderBy('order, title')`)
  *   updated: 2026-10-01         (optional: last significant change, for the sitemap)
  *   data: {form_title: Write us} (optional: anything else the template needs, translatable)
+ *   slug: chi-siamo             (translations only: this language's URL segment instead of the folder name)
  *   ---
  *
- * A translation (index.<code>.md) keeps the image, template, order, updated and data it omits.
+ * A translation (index.<code>.md) keeps the image, template, order, updated and data it omits. With
+ * `slug:` it gets its own URL, combined with its parents' translated slugs: about/credits in Italian
+ * can be /it/chi-siamo/riconoscimenti. The folder path (`path`) stays the page's identity; `uri` is
+ * its URL in that language, and Kernel::path('page', ['path' => 'about'], 'it') writes it.
  * Query pages with `pages()` (see Starlite\Query); a page without a version in a language doesn't
  * exist there. Compiled into var/cache/pages.php without APP_DEBUG, like the blog.
  *
- * @phpstan-type Page array{slug: string, path: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, order: ?int, updated: ?string, data: array<mixed>, html: string, source: string, assets: list<string>}
+ * @phpstan-type Page array{slug: string, path: string, uri: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, order: ?int, updated: ?string, data: array<mixed>, html: string, source: string, assets: list<string>}
  */
 final class Pages
 {
@@ -44,10 +48,10 @@ final class Pages
     /** A page path, for the route requirement: segments of lowercase letters, digits and dashes. */
     public const PATH = '[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*';
 
-    public const QUERY_FIELDS = ['slug', 'path', 'parent', 'depth', 'language', 'title', 'summary', 'image', 'template', 'order', 'updated'];
+    public const QUERY_FIELDS = ['slug', 'path', 'uri', 'parent', 'depth', 'language', 'title', 'summary', 'image', 'template', 'order', 'updated'];
     public const SEARCH_FIELDS = ['title', 'summary'];
 
-    private const FRONT_MATTER = ['title', 'summary', 'image', 'template', 'order', 'updated', 'data'];
+    private const FRONT_MATTER = ['title', 'summary', 'image', 'template', 'order', 'updated', 'data', 'slug'];
 
     /** @var array<string, array<string, Page>>|null language => path => page */
     private ?array $pages = null;
@@ -83,6 +87,12 @@ final class Pages
             array_keys($this->site->languages),
             fn (string $language) => isset($this->items($language)[$path]),
         ));
+    }
+
+    /** A page's URL path in a language (its `uri`), or null if it doesn't exist there. */
+    public function uri(string $path, string $language): ?string
+    {
+        return $this->items($language)[$path]['uri'] ?? null;
     }
 
     /** Absolute path of a page's published file ("about/team.jpg"), or null if there's no such page or file. */
@@ -167,8 +177,18 @@ final class Pages
                 $original ??= $language === $this->site->defaultLanguage ? $page : null;
             }
         }
-        foreach ($pages as &$versions) {
+        foreach ($pages as $language => &$versions) {
             ksort($versions, SORT_STRING);
+            // Parents come first (sorted by path), so their uri is known when a child's is built.
+            $uris = [];
+            foreach ($versions as $path => &$page) {
+                $page['uri'] = self::buildUri($path, $versions, $page['uri']);
+                if (isset($uris[$page['uri']])) {
+                    throw new \RuntimeException("{$page['source']}: /{$page['uri']} is already the URL of pages/{$uris[$page['uri']]}/ in this language ({$language}): change a \"slug\".");
+                }
+                $uris[$page['uri']] = $path;
+            }
+            unset($page);
         }
         unset($versions);
 
@@ -266,12 +286,22 @@ final class Pages
         if (!is_array($data)) {
             throw new \RuntimeException("{$source}: \"data\" must be a mapping (key: value).");
         }
+        $slug = $meta['slug'] ?? null;
+        if ($slug !== null) {
+            if ($language === $this->site->defaultLanguage) {
+                throw new \RuntimeException("{$source}: \"slug\" is only for translations: in the default language the folder name is the slug, rename the folder instead.");
+            }
+            if (!is_string($slug) || !preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $slug)) {
+                throw new \RuntimeException("{$source}: \"slug\" uses lowercase letters, digits and dashes (one URL segment).");
+            }
+        }
         $dir = dirname($file);
         $parent = dirname($path);
 
         return [
             'slug' => basename($path),
             'path' => $path,
+            'uri' => $slug ?? basename($path), // this language's own segment for now; the full uri is built in compile()
             'parent' => $parent === '.' ? '' : $parent,
             'depth' => substr_count($path, '/') + 1,
             'language' => $language,
@@ -288,6 +318,23 @@ final class Pages
             'source' => $source,
             'assets' => [],
         ];
+    }
+
+    /**
+     * A page's URL path in one language: its parent's (or, without a version in that language, the
+     * parent folder's own segments, still translated above it) plus its own translated slug.
+     *
+     * @param array<string, Page> $versions the language's pages, parents already done
+     */
+    private static function buildUri(string $path, array $versions, string $slug): string
+    {
+        $parent = dirname($path);
+        if ($parent === '.') {
+            return $slug;
+        }
+        $prefix = isset($versions[$parent]) ? $versions[$parent]['uri'] : self::buildUri($parent, $versions, basename($parent));
+
+        return $prefix . '/' . $slug;
     }
 
     /** @return list<string> publishable files directly in a page folder (subfolders are child pages) */

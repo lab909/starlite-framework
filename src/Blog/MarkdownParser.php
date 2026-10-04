@@ -28,6 +28,7 @@ use League\CommonMark\MarkdownConverter;
  *   ---
  *
  * The slug is the post's folder name and drafts are the posts in content/blog/drafts/ (see Blog).
+ * A translation may set `slug:` for its own URL (`uri`); the folder name stays the post's identity.
  * index.md is the default language; index.<code>.md a translation, whose omitted date, updated,
  * image and tags are inherited from index.md.
  * Relative links and images (`![Cover](cover.jpg)`) point at files in the post folder: they are
@@ -35,7 +36,7 @@ use League\CommonMark\MarkdownConverter;
  *
  * This only runs when the blog cache is built, never on a cached production request.
  *
- * @phpstan-type Post array{slug: string, language: string, title: string, date: string, updated: ?string, image: ?string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, source: string, assets: list<string>}
+ * @phpstan-type Post array{slug: string, uri: string, language: string, title: string, date: string, updated: ?string, image: ?string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, source: string, assets: list<string>}
  */
 final class MarkdownParser
 {
@@ -104,10 +105,13 @@ final class MarkdownParser
         if (!is_array($meta)) {
             throw new \RuntimeException("{$source}: missing YAML front matter.");
         }
-        foreach (['slug' => 'rename the post folder instead', 'draft' => 'move the post folder to content/blog/drafts/ instead'] as $key => $hint) {
-            if (array_key_exists($key, $meta)) {
-                throw new \RuntimeException("{$source}: \"{$key}\" is no longer a front matter field: {$hint}.");
-            }
+        if (array_key_exists('draft', $meta)) {
+            throw new \RuntimeException("{$source}: \"draft\" is no longer a front matter field: move the post folder to content/blog/drafts/ instead.");
+        }
+        // A translation's own URL segment (Blog refuses it in the default language).
+        $uri = $meta['slug'] ?? $slug;
+        if (!is_string($uri) || !preg_match('/^[a-z0-9]+(?:-[a-z0-9]+)*$/', $uri)) {
+            throw new \RuntimeException("{$source}: \"slug\" uses lowercase letters, digits and dashes (one URL segment).");
         }
 
         $title = $meta['title'] ?? null;
@@ -121,6 +125,7 @@ final class MarkdownParser
 
         return [
             'slug' => $slug,
+            'uri' => $uri,
             'language' => $language,
             'title' => trim($title),
             'date' => match (true) {

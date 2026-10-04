@@ -133,6 +133,26 @@ final class BlogTest extends FrameworkTestCase
         self::assertSame(['cover.png', 'files/doc.pdf', 'icon.svg'], $this->blog()->query()->language('en')->slug('alpha')->one()['assets'] ?? null);
     }
 
+    public function testTranslatedSlugsGivePostsTheirOwnUrl(): void
+    {
+        $content = $this->copyToTemp(self::CONTENT, 'content');
+        $file = $content . '/blog/2026/09/alpha/index.it.md';
+        file_put_contents($file, (string) preg_replace('/^---\n/', "---\nslug: alfa\n", (string) file_get_contents($file)));
+        $app = $this->kernel(overrides: ['content_dir' => $content, 'cache_dir' => $this->tempDir('cache')]);
+
+        self::assertSame(['alfa', 'alpha'], [$app->posts()->language('it')->slug('alpha')->one()['uri'] ?? null, $app->posts()->slug('alpha')->one()['uri'] ?? null]);
+        self::assertSame('/it/blog/alfa', $app->path('blog_post', ['slug' => 'alpha'], 'it'));
+        self::assertSame('/blog/alpha', $app->path('blog_post', ['slug' => 'alpha'], 'en'));
+
+        $html = $this->body($this->request($app, '/it/blog/alfa'));
+        self::assertStringContainsString('hreflang="en" href="https://example.test/blog/alpha"', $html);
+        self::assertStringContainsString('hreflang="it" href="https://example.test/it/blog/alfa"', $html);
+        $moved = $this->request($app, '/it/blog/alpha');
+        self::assertSame([301, '/it/blog/alfa'], [$moved->getStatusCode(), $moved->headers->get('Location')]);
+        self::assertSame(404, $this->request($app, '/blog/alfa')->getStatusCode());
+        self::assertStringContainsString('<loc>https://example.test/it/blog/alfa</loc>', $this->body($this->request($app, '/sitemap.xml')));
+    }
+
     // --- Search, tags, pages --------------------------------------------------------
 
     public function testSearchTagsAndPagesArePerLanguage(): void
@@ -196,7 +216,9 @@ final class BlogTest extends FrameworkTestCase
         yield 'missing title' => [['2026/09/untitled/index.md' => "---\ndate: 2026-09-01\n---\nx"], 'front matter needs a "title"'];
         yield 'missing date' => [['2026/09/undated/index.md' => "---\ntitle: X\n---\nx"], 'front matter needs a "date" in YYYY-MM-DD format'];
         yield 'malformed date' => [['2026/09/baddate/index.md' => "---\ntitle: X\ndate: 09/01/2026\n---\nx"], 'front matter needs a "date" in YYYY-MM-DD format'];
-        yield 'old slug field' => [['2026/09/old/index.md' => "---\ntitle: X\ndate: 2026-09-01\nslug: other\n---\nx"], '"slug" is no longer a front matter field: rename the post folder instead'];
+        yield 'slug in the default language' => [['2026/09/old/index.md' => "---\ntitle: X\ndate: 2026-09-01\nslug: other\n---\nx"], '2026/09/old/index.md: "slug" is only for translations: in the default language the folder name is the slug, rename the folder instead.'];
+        yield 'invalid translated slug' => [['2026/09/alpha/index.it.md' => "---\ntitle: X\nslug: Not Valid\n---\nx"], '2026/09/alpha/index.it.md: "slug" uses lowercase letters, digits and dashes'];
+        yield 'duplicate translated slug' => [['2026/09/beta/index.it.md' => "---\ntitle: B\nslug: alpha\n---\nx"], '/blog/alpha is already the URL of'];
         yield 'old draft field' => [['2026/09/old/index.md' => "---\ntitle: X\ndate: 2026-09-01\ndraft: true\n---\nx"], '"draft" is no longer a front matter field'];
         yield 'invalid yaml' => [['2026/09/yaml/index.md' => "---\ntitle: Note: this breaks\ndate: 2026-09-01\n---\nx"], '2026/09/yaml/index.md: invalid YAML front matter:'];
         yield 'missing linked file' => [['2026/09/img/index.md' => "---\ntitle: X\ndate: 2026-09-01\n---\n![a](nope.png)"], '"nope.png" not found in its folder'];

@@ -60,7 +60,7 @@ final class Blog
     }
 
     /** Keys of a post that queries can filter, sort and count by (`posts().where('draft', false)`). */
-    public const QUERY_FIELDS = ['slug', 'language', 'title', 'date', 'updated', 'image', 'summary', 'tags', 'draft', 'reading_minutes'];
+    public const QUERY_FIELDS = ['slug', 'uri', 'language', 'title', 'date', 'updated', 'image', 'summary', 'tags', 'draft', 'reading_minutes'];
 
     /** Keys `posts().search()` looks in. */
     public const SEARCH_FIELDS = ['title', 'summary', 'tags'];
@@ -83,6 +83,12 @@ final class Blog
     public function items(?string $language = null): array
     {
         return $this->compiled()[$language ?? $this->site->language()] ?? [];
+    }
+
+    /** A post's URL segment in a language (its `uri`: a translated slug, or the folder name), or null if it doesn't exist there. */
+    public function uri(string $slug, string $language): ?string
+    {
+        return $this->items($language)[$slug]['uri'] ?? null;
     }
 
     /** @return list<string> the languages a post exists in, in configured order */
@@ -185,6 +191,9 @@ final class Blog
             foreach ($files as $language => $file) {
                 $source = "{$folder}/{$file}";
                 $post = $parser->parseFile("{$this->contentDir}/{$source}", $slug, $language, $draft, $source, self::ASSET_URL . '/' . $slug, $original);
+                if ($language === $this->site->defaultLanguage && $post['uri'] !== $slug) {
+                    throw new \RuntimeException("{$source}: \"slug\" is only for translations: in the default language the folder name is the slug, rename the folder instead.");
+                }
                 // The folder is the publication month: 2026/09/<slug>/ must hold a post dated 2026-09-xx.
                 if ($month !== null && !str_starts_with($post['date'], $month)) {
                     throw new \RuntimeException("{$source}: date {$post['date']} does not match its YYYY/MM folder.");
@@ -194,8 +203,15 @@ final class Blog
                 $original ??= $language === $this->site->defaultLanguage ? $post : null;
             }
         }
-        foreach ($posts as &$versions) {
+        foreach ($posts as $language => &$versions) {
             uasort($versions, static fn (array $a, array $b) => [$b['date'], $a['title']] <=> [$a['date'], $b['title']]);
+            $uris = [];
+            foreach ($versions as $slug => $post) {
+                if (isset($uris[$post['uri']])) {
+                    throw new \RuntimeException("{$post['source']}: /blog/{$post['uri']} is already the URL of \"{$uris[$post['uri']]}\" in this language ({$language}): change a \"slug\".");
+                }
+                $uris[$post['uri']] = $slug;
+            }
         }
         unset($versions);
 

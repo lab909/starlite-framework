@@ -211,21 +211,21 @@ final class Kernel
 
     /**
      * Pages whose URL another route answers first, so they can never be shown (e.g. content/pages/blog/
-     * behind the blog route): path => route name. `deploy` refuses to run while there are any.
+     * behind the blog route), in any language: URL path => route name. `deploy` refuses to run while
+     * there are any.
      *
      * @return array<string, string>
      */
     public function shadowedPages(): array
     {
-        $paths = [];
-        foreach (array_keys($this->site->languages) as $language) {
-            $paths += $this->pages->items($language); // also pages that only exist in other languages
-        }
         $shadowed = [];
-        foreach (array_keys($paths) as $path) {
-            $route = $this->router->routeName('/' . $path);
-            if ($route !== null && $route !== 'page') {
-                $shadowed[$path] = $route;
+        foreach (array_keys($this->site->languages) as $language) {
+            foreach ($this->pages->items($language) as $page) {
+                // The language prefix is stripped before routing, so each language's URL is matched as is.
+                $route = $this->router->routeName('/' . $page['uri']);
+                if ($route !== null && $route !== 'page') {
+                    $shadowed[$page['uri']] = $route;
+                }
             }
         }
 
@@ -427,6 +427,15 @@ final class Kernel
      */
     public function path(string $name, array $params = [], ?string $language = null): string
     {
+        // Pages and posts are linked by their identity (folder path, slug); a translation can have its
+        // own URL (`slug:` in its front matter), so write the one for the target language.
+        $target = $language ?? $this->site->language();
+        if ($name === 'page' && is_string($params['path'] ?? null)) {
+            $params['path'] = $this->pages->uri($params['path'], $target) ?? $params['path'];
+        } elseif ($name === 'blog_post' && is_string($params['slug'] ?? null)) {
+            $params['slug'] = $this->blog->uri($params['slug'], $target) ?? $params['slug'];
+        }
+
         return $this->site->localize($this->router->generate($name, $params), $language);
     }
 
