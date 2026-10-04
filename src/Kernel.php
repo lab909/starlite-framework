@@ -32,6 +32,7 @@ final class Kernel
     public readonly Blog $blog;
     public readonly Vite $vite;
     public readonly PublicConfig $publicConfig;
+    public readonly Csp $csp;
     public readonly Seo $seo;
     public readonly Site $site;
     public readonly Translations $translations;
@@ -80,6 +81,11 @@ final class Kernel
             $config['content_dir'] ?? null,
             $config['cache_dir'] ?? null,
             $config['public'] ?? [],
+            new Csp(
+                $config['csp']['enabled'] ?? true,
+                $config['csp']['report_only'] ?? false,
+                $config['csp']['sources'] ?? [],
+            ),
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -103,7 +109,10 @@ final class Kernel
         }
     }
 
-    /** @param array<string, mixed> $public config values the browser may read (config/app.php `public`) */
+    /**
+     * @param array<string, mixed> $public config values the browser may read (config/app.php `public`)
+     * @param Csp|null             $csp    Content Security Policy; strict defaults when null
+     */
     public function __construct(
         public readonly string $root,
         string $secret,
@@ -113,6 +122,7 @@ final class Kernel
         ?string $contentDir = null,
         ?string $cacheDir = null,
         array $public = [],
+        ?Csp $csp = null,
     ) {
         $this->cacheDir = $cacheDir ?? $root . '/var/cache';
         $contentDir ??= $root . '/content';
@@ -123,6 +133,7 @@ final class Kernel
         $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->publicConfig = new PublicConfig($public, $secret);
+        $this->csp = $csp ?? new Csp();
         $this->datastar = new Datastar($secret, $this->site);
         $this->seo = new Seo($this->site);
         $this->requests = new RequestStack();
@@ -230,6 +241,11 @@ final class Kernel
             'Referrer-Policy' => 'strict-origin-when-cross-origin',
             'X-Frame-Options' => 'SAMEORIGIN',
         ]);
+        // Pages only (SSE, JSON and files don't load anything), unless the handler set its own policy.
+        $type = (string) $response->headers->get('Content-Type', 'text/html');
+        if ($this->csp->enabled && str_starts_with($type, 'text/html') && !$response->headers->has($this->csp->headerName())) {
+            $response->headers->set($this->csp->headerName(), $this->csp->header($this->vite->devServer()));
+        }
 
         // Pages are the same for every visitor (no sessions), so caches may store them
         // and revalidate cheaply: an unchanged page is answered with an empty 304.

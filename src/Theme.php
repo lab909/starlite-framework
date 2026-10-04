@@ -16,7 +16,7 @@ use Twig\TwigFunction;
  * with the `_theme` signal ('light', 'dark' or 'system'), saves the choice and follows system changes.
  *
  * The script is the same on every page and for every visitor (pages stay cacheable), so a Content
- * Security Policy can allow it by its hash: see {@see self::hash()}.
+ * Security Policy allows it by its hash ({@see Csp} adds it).
  */
 final class Theme extends AbstractExtension
 {
@@ -41,6 +41,6 @@ final class Theme extends AbstractExtension
     /** CSP source for the script, e.g. "'sha256-…'" in `script-src`. */
     public static function hash(): string
     {
-        return "'sha256-" . base64_encode(hash('sha256', self::SCRIPT, true)) . "'";
+        return Csp::hash(self::SCRIPT);
     }
 }

@@ -119,7 +119,8 @@ final class Vite extends AbstractExtension
         return true;
     }
 
-    private function devServer(): ?string
+    /** The Vite dev server's URL, in debug mode while `npm run dev` runs. */
+    public function devServer(): ?string
     {
         if (!$this->debug || !is_file($hot = $this->root . '/var/vite.hot')) {
             return null;
