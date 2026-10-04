@@ -28,9 +28,49 @@ final class Vite extends AbstractExtension
     ) {
     }
 
+    /** `as` and `type` of the files vite_preload() accepts, by extension. */
+    private const PRELOAD_TYPES = [
+        'woff2' => ['font', 'font/woff2'],
+        'woff' => ['font', 'font/woff'],
+        'avif' => ['image', 'image/avif'],
+        'webp' => ['image', 'image/webp'],
+        'png' => ['image', 'image/png'],
+        'jpg' => ['image', 'image/jpeg'],
+        'jpeg' => ['image', 'image/jpeg'],
+        'svg' => ['image', 'image/svg+xml'],
+    ];
+
     public function getFunctions(): array
     {
-        return [new TwigFunction('vite', $this->tags(...), ['is_safe' => ['html']])];
+        return [
+            new TwigFunction('vite', $this->tags(...), ['is_safe' => ['html']]),
+            new TwigFunction('vite_preload', $this->preload(...), ['is_safe' => ['html']]),
+        ];
+    }
+
+    /**
+     * `<link rel="preload">` for built assets the browser would otherwise find late, typically the
+     * main font file (only known once the CSS is parsed):
+     * `{{ vite_preload('node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') }}`.
+     * Sources are paths as in the manifest. Nothing is printed while the dev server runs.
+     */
+    public function preload(string ...$sources): string
+    {
+        if ($this->devServer() !== null) {
+            return '';
+        }
+        $tags = [];
+        foreach ($sources as $source) {
+            [$as, $type] = self::PRELOAD_TYPES[strtolower(pathinfo($source, PATHINFO_EXTENSION))]
+                ?? throw new \InvalidArgumentException("vite_preload() takes fonts and images, not \"{$source}\".");
+            $file = $this->manifest()[$source]['file']
+                ?? throw new \RuntimeException("Vite asset \"{$source}\" is not in the manifest. Run `npm run build`.");
+            // Fonts are always fetched in CORS mode: without crossorigin the preload would be wasted.
+            $tags[] = '<link rel="preload" href="' . self::e($this->asset($file)) . '" as="' . $as . '" type="' . $type . '"'
+                . ($as === 'font' ? ' crossorigin' : '') . '>';
+        }
+
+        return implode("\n", $tags);
     }
 
     /** @param string|list<string> ...$entries entries, or lists of entries; duplicates are printed once */

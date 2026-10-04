@@ -15,6 +15,8 @@ final class ViteTest extends FrameworkTestCase
             'resources/js/app.js' => ['file' => 'assets/app-123.js', 'isEntry' => true, 'imports' => ['_shared.js'], 'css' => ['assets/app-123.css']],
             '_shared.js' => ['file' => 'assets/shared-456.js', 'css' => ['assets/shared-456.css']],
             'resources/css/print.css' => ['file' => 'assets/print-789.css', 'isEntry' => true],
+            'node_modules/font/inter-latin.woff2' => ['file' => 'assets/inter-latin-abc.woff2', 'src' => 'node_modules/font/inter-latin.woff2'],
+            'resources/images/hero.webp' => ['file' => 'assets/hero-def.webp', 'src' => 'resources/images/hero.webp'],
         ], JSON_THROW_ON_ERROR)]);
 
         return $root;
@@ -43,6 +45,39 @@ final class ViteTest extends FrameworkTestCase
             $vite->tags('resources/js/app.js', ['resources/css/print.css', 'resources/js/app.js']),
         );
         self::assertSame($vite->tags('resources/js/app.js'), $vite->tags('resources/js/app.js', []));
+    }
+
+    public function testPreloadLinksForFontsAndImages(): void
+    {
+        $vite = new Vite($this->root(), $this->tempDir('cache'), false);
+
+        self::assertSame(
+            '<link rel="preload" href="/build/assets/inter-latin-abc.woff2" as="font" type="font/woff2" crossorigin>' . "\n"
+            . '<link rel="preload" href="/build/assets/hero-def.webp" as="image" type="image/webp">',
+            $vite->preload('node_modules/font/inter-latin.woff2', 'resources/images/hero.webp'),
+        );
+    }
+
+    public function testPreloadPrintsNothingWithTheDevServer(): void
+    {
+        $root = $this->root();
+        self::write($root, ['var/vite.hot' => 'https://site.test:5173']);
+
+        self::assertSame('', (new Vite($root, $this->tempDir('cache'), true))->preload('node_modules/font/inter-latin.woff2'));
+    }
+
+    public function testPreloadFailsClearly(): void
+    {
+        $vite = new Vite($this->root(), $this->tempDir('cache'), false);
+
+        try {
+            $vite->preload('node_modules/font/missing.woff2');
+            self::fail('A missing asset must throw.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('"node_modules/font/missing.woff2" is not in the manifest', $e->getMessage());
+        }
+        $this->expectExceptionMessage('vite_preload() takes fonts and images, not "resources/js/app.js"');
+        $vite->preload('resources/js/app.js');
     }
 
     public function testDevServerIsUsedOnlyInDebugMode(): void

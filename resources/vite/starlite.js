@@ -10,7 +10,8 @@
 //   and 'starlite' (browser helpers: ready, persist, publicConfig; see resources/js/starlite.js)
 // - build: output to public/build with a manifest (read by src/Vite.php) and source maps
 // - dev server: DDEV-aware origin/CORS on port 5173, and var/vite.hot so PHP points pages at it
-// - full page reloads when Twig templates, Markdown content or translations change
+// - full page reloads when Twig templates, Markdown content or translations change, and a restart
+//   when SVGs in resources/icons/ change (custom icons for the Iconify Tailwind plugin)
 // - envPrefix VITE_PUBLIC_: only variables named like that are ever inlined into the bundle
 //
 // Everything set here is a default: the same keys in vite.config.js win.
@@ -20,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const HOT_FILE = 'var/vite.hot';
 const PAGES_DIR = 'resources/js/pages';
+const ICONS_DIR = 'resources/icons';
 const FRAMEWORK_JS = fileURLToPath(new URL('../js/', import.meta.url));
 
 /** resources/js/app.js plus resources/js/pages/*.js, so a new page bundle needs no config change. */
@@ -44,11 +46,16 @@ export default function starlite({ input = defaultInput(), reload = [] } = {}) {
     return [
         {
             name: 'starlite:config',
-            config(user) {
+            config(user, { command }) {
                 const server = user.server ?? {};
                 const build = user.build ?? {};
+                const outDir = build.outDir ?? 'public/build';
 
                 return {
+                    // Built files are served from /build/ (the outDir inside public/): URLs inside the
+                    // bundles, such as fonts and images referenced from CSS, must include it. The dev
+                    // server serves from its own root.
+                    base: user.base ?? (command === 'build' ? '/' + path.relative('public', outDir).split(path.sep).join('/') + '/' : '/'),
                     // Both resolve to one file each, so every bundle shares a single Datastar instance
                     // (and its signals). The app's own resolve.alias entries are merged in by Vite.
                     resolve: {
@@ -60,7 +67,7 @@ export default function starlite({ input = defaultInput(), reload = [] } = {}) {
                     publicDir: user.publicDir ?? false,
                     envPrefix: user.envPrefix ?? 'VITE_PUBLIC_',
                     build: {
-                        outDir: build.outDir ?? 'public/build',
+                        outDir,
                         emptyOutDir: build.emptyOutDir ?? true,
                         manifest: build.manifest ?? true,
                         sourcemap: build.sourcemap ?? true,
@@ -99,6 +106,14 @@ export default function starlite({ input = defaultInput(), reload = [] } = {}) {
                         server.ws.send({ type: 'full-reload' });
                     }
                 };
+                // The Iconify plugin reads resources/icons/ once, at startup: restart Vite to pick up
+                // added, changed or removed SVGs (the page then reloads by itself).
+                const iconsDir = path.resolve(ICONS_DIR) + path.sep;
+                ['change', 'add', 'unlink'].forEach((event) => server.watcher.on(event, (file) => {
+                    if (file.startsWith(iconsDir) && file.endsWith('.svg')) {
+                        server.restart();
+                    }
+                }));
                 ['change', 'add', 'unlink'].forEach((event) => server.watcher.on(event, onFile));
             },
         },
