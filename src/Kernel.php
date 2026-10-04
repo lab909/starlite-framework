@@ -26,6 +26,7 @@ use Twig\Extra\Intl\IntlExtension;
 use Twig\Loader\FilesystemLoader;
 use Twig\TwigFunction;
 
+/** @phpstan-import-type Post from \Starlite\Blog\MarkdownParser */
 final class Kernel
 {
     public readonly Environment $twig;
@@ -161,8 +162,9 @@ final class Kernel
         $this->twig->addExtension($this->translations);
         $this->twig->addExtension(new IntlExtension()); // format_date / format_number, localized with site.locale
         $this->twig->addFunction(new TwigFunction('path', $this->path(...)));
-        $this->twig->addGlobal('blog', $this->blog);
-        $this->twig->addGlobal('collections', $this->collections);
+        // Content is queried, not injected: posts() and collection('faq') return a Starlite\Query.
+        $this->twig->addFunction(new TwigFunction('posts', $this->posts(...)));
+        $this->twig->addFunction(new TwigFunction('collection', $this->collection(...)));
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
         $this->route(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/datastar', $this->renderDatastarTemplate(...), 'datastar');
@@ -171,11 +173,33 @@ final class Kernel
         if ($this->collections->exported() !== []) {
             $this->get(
                 '/data/{collection}.json',
-                fn (string $collection) => new JsonResponse($this->collections->get($collection)->json()),
+                fn (string $collection) => new JsonResponse($this->collections->json($collection)),
                 'collection_json',
                 ['collection' => implode('|', array_map(preg_quote(...), $this->collections->exported()))],
             );
         }
+    }
+
+    // --- Content ----------------------------------------------------------------
+
+    /**
+     * A query over the blog posts, newest first: `$app->posts()->tag('php')->limit(5)->all()`.
+     *
+     * @return Query<Post>
+     */
+    public function posts(): Query
+    {
+        return $this->blog->query();
+    }
+
+    /**
+     * A query over a data collection (config/collections.php): `$app->collection('faq')->all()`.
+     *
+     * @return Query<array<string, mixed>>
+     */
+    public function collection(string $name): Query
+    {
+        return $this->collections->query($name);
     }
 
     // --- Routing --------------------------------------------------------------

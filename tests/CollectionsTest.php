@@ -46,16 +46,16 @@ final class CollectionsTest extends FrameworkTestCase
 
     public function testMarkdownAndYamlItemsInTheirConfiguredOrder(): void
     {
-        $faq = $this->app()->collections['faq'];
+        $faq = $this->app()->collection('faq');
 
         self::assertSame(['what', 'install', 'later'], array_column($faq->all(), 'slug'));
         self::assertSame(3, count($faq));
-        $install = $faq->find('install');
+        $install = $faq->slug('install')->one();
         self::assertSame(['slug' => 'install', 'language' => 'en', 'question' => 'How do I install it?', 'order' => 2, 'tags' => ['setup'], 'html' => '<p>Run <strong>composer</strong>.</p>', 'source' => 'faq/install.md'], $install);
-        self::assertNull($faq->find('what')['tags'] ?? null, 'optional fields are null when missing');
-        self::assertSame('', $faq->find('later')['html'] ?? null);
+        self::assertNull($faq->slug('what')->one()['tags'] ?? null, 'optional fields are null when missing');
+        self::assertSame('', $faq->slug('later')->one()['html'] ?? null);
 
-        $team = $this->app()->collections['team']->all();
+        $team = $this->app()->collection('team')->all();
         self::assertSame(['bob', 'ada'], array_column($team, 'slug'), 'sorted by -joined: newest first');
         self::assertSame(['2025-01-15', '2024-03-01'], array_column($team, 'joined'), 'quoted and unquoted dates');
         self::assertSame(2.0, $team[1]['rate']);
@@ -66,27 +66,27 @@ final class CollectionsTest extends FrameworkTestCase
 
     public function testTranslationsInheritWhatTheyOmitAndUntranslatedItemsAreHidden(): void
     {
-        $faq = $this->app()->collections['faq'];
+        $faq = $this->app()->collection('faq');
 
-        $install = $faq->find('install', 'it');
+        $install = $faq->language('it')->slug('install')->one();
         self::assertSame(['Come si installa?', 2, ['setup'], '<p>Esegui <strong>composer</strong>.</p>', 'it'], [$install['question'] ?? null, $install['order'] ?? null, $install['tags'] ?? null, $install['html'] ?? null, $install['language'] ?? null]);
-        self::assertSame(['install'], array_column($faq->all('it'), 'slug'), 'no fallback: untranslated items do not exist in Italian');
+        self::assertSame(['install'], array_column($faq->language('it')->all(), 'slug'), 'no fallback: untranslated items do not exist in Italian');
     }
 
     public function testFallbackShowsTheDefaultLanguageVersion(): void
     {
-        $team = $this->app()->collections['team'];
+        $team = $this->app()->collection('team');
 
-        self::assertSame(['bob', 'ada'], array_column($team->all('it'), 'slug'));
-        self::assertSame('en', $team->find('bob', 'it')['language'] ?? null, 'marked as English, for lang=""');
-        self::assertSame(['it', "<p>Scrive <em>test</em>.</p>\n", 'Ada'], [$team->find('ada', 'it')['language'] ?? null, $team->find('ada', 'it')['bio'] ?? null, $team->find('ada', 'it')['name'] ?? null]);
+        self::assertSame(['bob', 'ada'], array_column($team->language('it')->all(), 'slug'));
+        self::assertSame('en', $team->language('it')->slug('bob')->one()['language'] ?? null, 'marked as English, for lang=""');
+        self::assertSame(['it', "<p>Scrive <em>test</em>.</p>\n", 'Ada'], [$team->language('it')->slug('ada')->one()['language'] ?? null, $team->language('it')->slug('ada')->one()['bio'] ?? null, $team->language('it')->slug('ada')->one()['name'] ?? null]);
     }
 
     public function testTemplatesUseThemInTheCurrentLanguage(): void
     {
         $app = $this->app();
         $app->get('/faq', fn () => $app->twig->createTemplate(
-            '{% for q in collections.faq %}[{{ q.question }}]{% endfor %} {{ collections.faq.find("what").question ?? "-" }} {{ collections.team|length }}',
+            '{% for q in collection("faq") %}[{{ q.question }}]{% endfor %} {{ collection("faq").slug("what").one().question ?? "-" }} {{ collection("team")|length }}',
         )->render());
 
         self::assertSame('[What is it?][How do I install it?][Untranslated?] What is it? 2', $this->body($this->request($app, '/faq')));
@@ -98,7 +98,7 @@ final class CollectionsTest extends FrameworkTestCase
         $files = ['faq/a.md' => "---\nquestion: A\norder: 1\n---\n", 'faq/b.md' => "---\nquestion: B\n---\n", 'faq/c.md' => "---\nquestion: C\norder: 2\n---\n"];
         foreach (['priority' => ['a', 'c', 'b'], '-priority' => ['c', 'a', 'b']] as $sort => $expected) {
             $schemas = ['faq' => ['fields' => ['question' => 'string', 'order' => '?int'], 'sort' => str_replace('priority', 'order', $sort)]];
-            self::assertSame($expected, array_column($this->app($files, $schemas)->collections['faq']->all(), 'slug'), $sort);
+            self::assertSame($expected, array_column($this->app($files, $schemas)->collection('faq')->all(), 'slug'), $sort);
         }
     }
 
@@ -107,18 +107,18 @@ final class CollectionsTest extends FrameworkTestCase
         $files = self::FILES + ['faq/what.it.md' => "---\nquestion: Cos'è?\n---\n"];
 
         self::assertSame(["Cos'è?", '<p>A framework.</p>'], [
-            $this->app($files)->collections['faq']->find('what', 'it')['question'] ?? null,
-            $this->app($files)->collections['faq']->find('what', 'it')['html'] ?? null,
+            $this->app($files)->collection('faq')->language('it')->slug('what')->one()['question'] ?? null,
+            $this->app($files)->collection('faq')->language('it')->slug('what')->one()['html'] ?? null,
         ]);
     }
 
     public function testWhere(): void
     {
-        $faq = $this->app()->collections['faq'];
+        $faq = $this->app()->collection('faq');
 
-        self::assertSame(['install', 'later'], array_column($faq->where('tags', 'setup'), 'slug'), 'a list field contains the value');
-        self::assertSame(['what'], array_column($faq->where('order', 1), 'slug'));
-        $this->expectExceptionMessage('Collection "faq" has no field "nope"');
+        self::assertSame(['install', 'later'], array_column($faq->where('tags', 'setup')->all(), 'slug'), 'a list field contains the value');
+        self::assertSame(['what'], array_column($faq->where('order', 1)->all(), 'slug'));
+        $this->expectExceptionMessage('collection "faq": no field "nope". Fields: slug, language, question, order, tags.');
         $faq->where('nope', 1);
     }
 
@@ -156,13 +156,13 @@ final class CollectionsTest extends FrameworkTestCase
 
         // Content changes don't show until the next deploy (warmup), as for the blog.
         $fresh = $this->kernel(false, ['content_dir' => $this->tempDir('empty'), 'collections' => self::SCHEMAS, 'cache_dir' => $cache]);
-        self::assertCount(3, $fresh->collections['faq']);
+        self::assertCount(3, $fresh->collection('faq'));
     }
 
     public function testEmptyAndMissingFoldersAreEmptyCollections(): void
     {
-        self::assertCount(0, $this->app(['faq/.gitkeep' => ''])->collections['faq']);
-        self::assertCount(0, $this->app([])->collections['team']);
+        self::assertCount(0, $this->app(['faq/.gitkeep' => ''])->collection('faq'));
+        self::assertCount(0, $this->app([])->collection('team'));
     }
 
     /** @return iterable<string, array{array<string, string>, string, 2?: array<mixed>}> */
@@ -199,7 +199,7 @@ final class CollectionsTest extends FrameworkTestCase
         $app = $this->app($content);
 
         $this->expectExceptionMessage($message);
-        $app->collections['faq']->all();
+        $app->collection('faq')->all();
     }
 
     /** @return iterable<string, array{array<mixed>, string}> */
@@ -226,6 +226,6 @@ final class CollectionsTest extends FrameworkTestCase
     public function testUnknownCollectionNamesTheConfiguredOnes(): void
     {
         $this->expectExceptionMessage('Unknown collection "faqs". Collections: faq, team (config/collections.php).');
-        $this->app()->collections->get('faqs');
+        $this->app()->collection('faqs');
     }
 }

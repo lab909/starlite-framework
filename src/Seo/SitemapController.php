@@ -33,7 +33,7 @@ final class SitemapController extends Controller
                 self::url($xml, $this->app->seo->url($this->app->site->localize($path, $language)));
             }
 
-            foreach ($this->app->blog->all($language) as $post) {
+            foreach ($this->app->posts()->language($language) as $post) {
                 if ($post['draft']) {
                     continue; // only listed while APP_DEBUG=1; never advertise them to crawlers
                 }

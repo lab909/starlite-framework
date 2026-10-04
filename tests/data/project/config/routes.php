@@ -24,7 +24,7 @@ return static function (Kernel $app): void {
     $app->route(['POST'], '/open', static fn () => 'open ok', 'open', csrf: false);
 
     // Minimal blog pages, built like an app's BlogController.
-    $app->get('/blog', static fn () => $app->render('list.twig', ['result' => $app->blog->page(1)]), 'blog');
+    $app->get('/blog', static fn () => $app->render('list.twig', ['result' => $app->posts()->paginate(1)]), 'blog');
     $app->get('/blog/feed.xml', FeedController::class, 'blog_feed');
     $app->get('/blog/{slug}', static function (string $slug) use ($app) {
         $alternates = [];
@@ -32,7 +32,7 @@ return static function (Kernel $app): void {
             $alternates[$language] = $app->path('blog_post', ['slug' => $slug], $language);
         }
         $app->site->setAlternates($alternates);
-        $post = $app->blog->find($slug);
+        $post = $app->posts()->slug($slug)->one();
         if ($post === null) {
             return $app->error(404, 'Post not found.');
         }

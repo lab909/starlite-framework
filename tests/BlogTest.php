@@ -31,16 +31,16 @@ final class BlogTest extends FrameworkTestCase
     {
         $blog = $this->blog(debug: false);
 
-        self::assertSame(['beta', 'alpha'], array_column($blog->all('en'), 'slug'));
-        self::assertSame(['alpha', 'gamma'], array_column($blog->all('it'), 'slug'));
+        self::assertSame(['beta', 'alpha'], array_column($blog->query()->language('en')->all(), 'slug'));
+        self::assertSame(['alpha', 'gamma'], array_column($blog->query()->language('it')->all(), 'slug'));
     }
 
     public function testUntranslatedPostsDoNotExistInThatLanguage(): void
     {
         $blog = $this->blog(debug: false);
 
-        self::assertNull($blog->find('beta', 'it'));
-        self::assertNull($blog->find('gamma', 'en'));
+        self::assertNull($blog->query()->language('it')->slug('beta')->one());
+        self::assertNull($blog->query()->language('en')->slug('gamma')->one());
         self::assertSame(['en', 'it'], $blog->translations('alpha'));
         self::assertSame(['en'], $blog->translations('beta'));
         self::assertSame(['it'], $blog->translations('gamma'));
@@ -52,14 +52,14 @@ final class BlogTest extends FrameworkTestCase
         $blog = $this->blog(debug: false, site: $site);
         $site->enter('it', '/blog');
 
-        self::assertSame('Alfa', $blog->find('alpha')['title'] ?? null);
+        self::assertSame('Alfa', $blog->query()->slug('alpha')->one()['title'] ?? null);
     }
 
     public function testDraftsOnlyExistInDebugMode(): void
     {
-        self::assertNull($this->blog(debug: false)->find('delta', 'en'));
+        self::assertNull($this->blog(debug: false)->query()->language('en')->slug('delta')->one());
 
-        $draft = $this->blog(debug: true)->find('delta', 'en');
+        $draft = $this->blog(debug: true)->query()->language('en')->slug('delta')->one();
         self::assertNotNull($draft);
         self::assertTrue($draft['draft']);
         self::assertSame(gmdate('Y-m-d'), $draft['date'], 'a draft without a date sorts as if published today');
@@ -69,7 +69,7 @@ final class BlogTest extends FrameworkTestCase
 
     public function testFrontMatterFields(): void
     {
-        $post = $this->blog()->find('alpha', 'en');
+        $post = $this->blog()->query()->language('en')->slug('alpha')->one();
 
         self::assertNotNull($post);
         self::assertSame('Alpha "quoted" & <b>bold</b>', $post['title']);
@@ -84,12 +84,12 @@ final class BlogTest extends FrameworkTestCase
     public function testSummaryDefaultsToTheFirstParagraphWithText(): void
     {
         // alpha opens with an image-only paragraph; whitespace and line breaks are collapsed.
-        self::assertSame('First paragraph of alpha, with a line break.', $this->blog()->find('alpha', 'en')['summary'] ?? null);
+        self::assertSame('First paragraph of alpha, with a line break.', $this->blog()->query()->language('en')->slug('alpha')->one()['summary'] ?? null);
     }
 
     public function testTranslationsInheritWhatTheyOmit(): void
     {
-        $post = $this->blog()->find('alpha', 'it');
+        $post = $this->blog()->query()->language('it')->slug('alpha')->one();
 
         self::assertNotNull($post);
         self::assertSame('Alfa', $post['title']);
@@ -103,14 +103,14 @@ final class BlogTest extends FrameworkTestCase
 
     public function testPostsWrittenOnlyInASecondaryLanguageKeepTheirOwnDate(): void
     {
-        self::assertSame('2026-08-05', $this->blog()->find('gamma', 'it')['date'] ?? null);
+        self::assertSame('2026-08-05', $this->blog()->query()->language('it')->slug('gamma')->one()['date'] ?? null);
     }
 
     // --- Markdown -----------------------------------------------------------------
 
     public function testMarkdownIsRenderedSafely(): void
     {
-        $html = $this->blog()->find('alpha', 'en')['html'] ?? '';
+        $html = $this->blog()->query()->language('en')->slug('alpha')->one()['html'] ?? '';
 
         self::assertStringContainsString('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;', $html, 'raw HTML is escaped');
         self::assertStringNotContainsString('<script', $html);
@@ -123,14 +123,14 @@ final class BlogTest extends FrameworkTestCase
     {
         $blog = $this->blog();
 
-        self::assertStringContainsString('<img src="/media/blog/alpha/cover.png" alt="Diagram" />', $blog->find('alpha', 'en')['html'] ?? '');
-        self::assertStringContainsString('href="/media/blog/alpha/files/doc.pdf"', $blog->find('alpha', 'en')['html'] ?? '');
-        self::assertStringContainsString('<img src="/media/blog/alpha/cover.png" alt="Diagramma" />', $blog->find('alpha', 'it')['html'] ?? '');
+        self::assertStringContainsString('<img src="/media/blog/alpha/cover.png" alt="Diagram" />', $blog->query()->language('en')->slug('alpha')->one()['html'] ?? '');
+        self::assertStringContainsString('href="/media/blog/alpha/files/doc.pdf"', $blog->query()->language('en')->slug('alpha')->one()['html'] ?? '');
+        self::assertStringContainsString('<img src="/media/blog/alpha/cover.png" alt="Diagramma" />', $blog->query()->language('it')->slug('alpha')->one()['html'] ?? '');
     }
 
     public function testOnlyAllowedFileTypesArePublished(): void
     {
-        self::assertSame(['cover.png', 'files/doc.pdf', 'icon.svg'], $this->blog()->find('alpha', 'en')['assets'] ?? null);
+        self::assertSame(['cover.png', 'files/doc.pdf', 'icon.svg'], $this->blog()->query()->language('en')->slug('alpha')->one()['assets'] ?? null);
     }
 
     // --- Search, tags, pages --------------------------------------------------------
@@ -139,18 +139,19 @@ final class BlogTest extends FrameworkTestCase
     {
         $blog = $this->blog(debug: false, perPage: 1);
 
-        self::assertSame(['beta'], array_column($blog->search('searching', '', 'en'), 'slug'), 'matches the summary');
-        self::assertSame(['alpha'], array_column($blog->search('', 'php', 'en'), 'slug'));
-        self::assertSame([], $blog->search('beta', '', 'it'));
-        self::assertEquals(['guide' => 1, 'php' => 1, 'starlite' => 1], $blog->tags('en'), 'counts per tag; ties in any order');
-        self::assertEquals(['guida' => 1, 'php' => 1, 'starlite' => 1], $blog->tags('it'));
+        $en = $blog->query()->language('en');
+        self::assertSame(['beta'], array_column($en->search('searching')->all(), 'slug'), 'matches the summary');
+        self::assertSame(['alpha'], array_column($en->tag('php')->all(), 'slug'));
+        self::assertSame([], $blog->query()->language('it')->search('beta')->all());
+        self::assertEquals(['guide' => 1, 'php' => 1, 'starlite' => 1], $en->countBy('tags'), 'counts per tag; ties in any order');
+        self::assertEquals(['guida' => 1, 'php' => 1, 'starlite' => 1], $blog->query()->language('it')->countBy('tags'));
 
-        $page2 = $blog->page(2, language: 'en');
-        self::assertSame(['alpha'], array_column($page2['posts'], 'slug'));
-        self::assertSame(['page' => 2, 'pages' => 2, 'total' => 2, 'has_more' => false], array_diff_key($page2, ['posts' => 1]));
-        self::assertTrue($blog->page(1, language: 'en')['has_more']);
-        self::assertSame([], $blog->page(9, language: 'en')['posts']);
-        self::assertSame(['alpha'], array_column($blog->page(1, '', 'php', 'en')['posts'], 'slug'));
+        $page2 = $en->paginate(2);
+        self::assertSame(['alpha'], array_column($page2['items'], 'slug'));
+        self::assertSame(['page' => 2, 'pages' => 2, 'per_page' => 1, 'total' => 2, 'has_more' => false], array_diff_key($page2, ['items' => 1]));
+        self::assertTrue($en->paginate(1)['has_more']);
+        self::assertSame([], $en->paginate(9)['items']);
+        self::assertSame(['alpha'], array_column($en->tag('php')->paginate(1)['items'], 'slug'));
     }
 
     // --- Cache and assets ----------------------------------------------------------
@@ -166,7 +167,7 @@ final class BlogTest extends FrameworkTestCase
 
         unlink($content . '/blog/2026/09/beta/index.md');
         $fresh = new Blog($content . '/blog', $cache, false, $this->site());
-        self::assertNotNull($fresh->find('beta', 'en'), 'served from the cache until the next deploy');
+        self::assertNotNull($fresh->query()->language('en')->slug('beta')->one(), 'served from the cache until the next deploy');
     }
 
     public function testPublishAssetsCopiesOnlyPublishedPostFiles(): void
@@ -217,7 +218,7 @@ final class BlogTest extends FrameworkTestCase
         self::write($content . '/blog', $files);
 
         $this->expectExceptionMessage($message);
-        $this->blog(debug: false, content: $content)->all('en');
+        $this->blog(debug: false, content: $content)->query()->language('en')->all();
     }
 
     public function testDraftErrorsDoNotBreakProductionBuilds(): void
@@ -225,7 +226,7 @@ final class BlogTest extends FrameworkTestCase
         $content = $this->copyToTemp(self::CONTENT, 'content');
         self::write($content . '/blog', ['drafts/broken/index.md' => 'no front matter']);
 
-        self::assertCount(2, $this->blog(debug: false, content: $content)->all('en'));
+        self::assertCount(2, $this->blog(debug: false, content: $content)->query()->language('en')->all());
     }
 
     public function testEditorTempFilesAreIgnored(): void
@@ -233,6 +234,6 @@ final class BlogTest extends FrameworkTestCase
         $content = $this->copyToTemp(self::CONTENT, 'content');
         self::write($content . '/blog', ['2026/09/alpha/.index.md.swp' => 'x', '2026/09/.notes.md' => 'x']);
 
-        self::assertCount(2, $this->blog(debug: false, content: $content)->all('en'));
+        self::assertCount(2, $this->blog(debug: false, content: $content)->query()->language('en')->all());
     }
 }

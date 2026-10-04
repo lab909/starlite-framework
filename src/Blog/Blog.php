@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Starlite\Blog;
 
 use Starlite\Cache;
+use Starlite\Query;
 use Starlite\Site;
 
 /**
@@ -16,8 +17,8 @@ use Starlite\Site;
  *   content/blog/2026/09/hello-starlite/cover.jpg    served as /media/blog/hello-starlite/cover.jpg
  *   content/blog/drafts/next-post/index.md           draft: only visible with APP_DEBUG=1
  *
- * Every method works in the current language (Site::language()) unless one is given. A post
- * without a version in a language doesn't exist there: not listed, not searchable, 404.
+ * Query posts with `posts()` (Twig) or `$app->posts()` (PHP): see Starlite\Query. A post without
+ * a version in a language doesn't exist there: not listed, not searchable, 404.
  *
  * Without APP_DEBUG the parsed posts (HTML included) are compiled once into var/cache/blog.php,
  * so a request only reads an Opcache-resident array. Run `bin/console deploy` (or cache:clear)
@@ -58,16 +59,30 @@ final class Blog
     ) {
     }
 
-    /** @return list<Post> newest first */
-    public function all(?string $language = null): array
+    /** Keys of a post that queries can filter, sort and count by (`posts().where('draft', false)`). */
+    public const QUERY_FIELDS = ['slug', 'language', 'title', 'date', 'updated', 'image', 'summary', 'tags', 'draft', 'reading_minutes'];
+
+    /** Keys `posts().search()` looks in. */
+    public const SEARCH_FIELDS = ['title', 'summary', 'tags'];
+
+    /**
+     * A query over the posts, newest first: what `posts()` and `$app->posts()` return.
+     *
+     * @return Query<Post>
+     */
+    public function query(): Query
     {
-        return array_values($this->posts($language));
+        return new Query('posts', $this->items(...), self::QUERY_FIELDS, self::SEARCH_FIELDS, $this->site, $this->perPage);
     }
 
-    /** @return Post|null */
-    public function find(string $slug, ?string $language = null): ?array
+    /**
+     * Every post in a language, newest first: the source of query().
+     *
+     * @return array<string, Post> slug => post
+     */
+    public function items(?string $language = null): array
     {
-        return $this->posts($language)[$slug] ?? null;
+        return $this->compiled()[$language ?? $this->site->language()] ?? [];
     }
 
     /** @return list<string> the languages a post exists in, in configured order */
@@ -75,7 +90,7 @@ final class Blog
     {
         return array_values(array_filter(
             array_keys($this->site->languages),
-            fn (string $language) => isset($this->posts($language)[$slug]),
+            fn (string $language) => isset($this->items($language)[$slug]),
         ));
     }
 
@@ -83,7 +98,7 @@ final class Blog
     public function asset(string $slug, string $file): ?string
     {
         foreach (array_keys($this->site->languages) as $language) {
-            $post = $this->find($slug, $language);
+            $post = $this->items($language)[$slug] ?? null;
             if ($post !== null) {
                 return in_array($file, $post['assets'], true) ? $this->contentDir . '/' . dirname($post['source']) . '/' . $file : null;
             }
@@ -123,60 +138,6 @@ final class Blog
         return $count;
     }
 
-    /** @return array<string, int> tag => number of posts, most used first */
-    public function tags(?string $language = null): array
-    {
-        $tags = [];
-        foreach ($this->posts($language) as $post) {
-            foreach ($post['tags'] as $tag) {
-                $tags[$tag] = ($tags[$tag] ?? 0) + 1;
-            }
-        }
-        arsort($tags);
-
-        return $tags;
-    }
-
-    /**
-     * One page of posts, newest first, optionally filtered like search(). A page past the end has
-     * no posts (the controller turns that into a 404).
-     *
-     * @return array{posts: list<Post>, page: int, pages: int, total: int, has_more: bool}
-     */
-    public function page(int|string $page, string $query = '', string $tag = '', ?string $language = null): array
-    {
-        $page = max(1, (int) $page);
-        $posts = $query === '' && $tag === '' ? $this->all($language) : $this->search($query, $tag, $language);
-        $total = count($posts);
-        $pages = max(1, (int) ceil($total / $this->perPage));
-
-        return [
-            'posts' => array_slice($posts, ($page - 1) * $this->perPage, $this->perPage),
-            'page' => $page,
-            'pages' => $pages,
-            'total' => $total,
-            'has_more' => $page < $pages,
-        ];
-    }
-
-    /** @return list<Post> posts whose title, summary or tags contain $query, optionally limited to one tag */
-    public function search(string $query = '', string $tag = '', ?string $language = null): array
-    {
-        $query = mb_strtolower(trim($query));
-
-        return array_values(array_filter($this->posts($language), static function (array $post) use ($query, $tag): bool {
-            if ($tag !== '' && !in_array($tag, $post['tags'], true)) {
-                return false;
-            }
-            if ($query === '') {
-                return true;
-            }
-            $haystack = mb_strtolower($post['title'] . ' ' . $post['summary'] . ' ' . implode(' ', $post['tags']));
-
-            return str_contains($haystack, $query);
-        }));
-    }
-
     /**
      * Parses every Markdown file and writes the cache.
      *
@@ -195,12 +156,6 @@ final class Blog
         }
 
         return [count($slugs), array_sum(array_map('count', $posts))];
-    }
-
-    /** @return array<string, Post> slug => post in one language */
-    private function posts(?string $language): array
-    {
-        return $this->compiled()[$language ?? $this->site->language()] ?? [];
     }
 
     /** @return array<string, array<string, Post>> */

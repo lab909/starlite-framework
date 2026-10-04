@@ -18,8 +18,7 @@ final class FeedController extends Controller
     public function __invoke(): Response
     {
         $seo = $this->app->seo;
-        $published = array_filter($this->app->blog->all(), static fn (array $post) => !$post['draft']);
-        $posts = array_slice(array_values($published), 0, self::LIMIT);
+        $posts = $this->app->posts()->where('draft', false)->limit(self::LIMIT)->all();
         $author = $seo->site->author ?? $seo->site->name;
 
         $xml = new \XMLWriter();

@@ -6,6 +6,7 @@ namespace Starlite\Collections;
 
 use Starlite\Blog\MarkdownParser;
 use Starlite\Cache;
+use Starlite\Query;
 use Starlite\Site;
 use Symfony\Component\Yaml\Yaml;
 
@@ -17,16 +18,13 @@ use Symfony\Component\Yaml\Yaml;
  *   content/faq/what-is-starlite.it.md    Italian version: omitted fields keep the default-language value
  *   content/team/ada.yaml                 data only
  *
- * The file name is the item's slug. In Twig: `{% for q in collections.faq %}`, `collections.faq.find('x')`;
- * in PHP: `$app->collections['faq']`. Everything works in the current language.
+ * The file name is the item's slug. Query them with `collection('faq')` in Twig or
+ * `$app->collection('faq')` in PHP (see Starlite\Query), in the current language.
  *
  * Without APP_DEBUG every collection is compiled once into var/cache/collections.php (Markdown
  * already rendered), like the blog: run `bin/console deploy` after changing content.
- *
- * @implements \ArrayAccess<string, Collection>
- * @implements \IteratorAggregate<string, Collection>
  */
-final class Collections implements \ArrayAccess, \IteratorAggregate, \Countable
+final class Collections
 {
     /** content/ folders that belong to Starlite, not to collections. */
     public const RESERVED = ['blog', 'pages'];
@@ -54,13 +52,47 @@ final class Collections implements \ArrayAccess, \IteratorAggregate, \Countable
         $this->schemas = $schemas;
     }
 
-    public function get(string $name): Collection
+    /**
+     * A query over one collection: `collection('faq').where('featured', true).all()`. Items are in
+     * the collection's `sort` order unless the query sets one.
+     *
+     * @return Query<array<string, mixed>>
+     */
+    public function query(string $name): Query
     {
-        $schema = $this->schemas[$name] ?? throw new \InvalidArgumentException(
+        $schema = $this->schema($name);
+        $plain = array_keys(array_filter($schema->fields, static fn (array $field) => in_array($field[0], ['string', 'list'], true)));
+
+        return new Query(
+            "collection \"{$name}\"",
+            fn (string $language) => $this->compiled()[$language][$name] ?? [],
+            ['slug', 'language', ...array_keys($schema->fields)],
+            $plain,
+            $this->site,
+        );
+    }
+
+    /**
+     * The fields allowlisted under `json` in config/collections.php, plus slug and language: what
+     * /data/<collection>.json serves to JavaScript.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function json(string $name, ?string $language = null): array
+    {
+        $schema = $this->schema($name);
+        $fields = $schema->json ?? throw new \LogicException("Collection \"{$name}\" has no JSON export: set \"json\" in config/collections.php.");
+        $keep = array_flip(['slug', 'language', ...$fields]);
+        $items = $this->compiled()[$language ?? $this->site->language()][$name] ?? [];
+
+        return array_values(array_map(static fn (array $item) => array_intersect_key($item, $keep), $items));
+    }
+
+    public function schema(string $name): Schema
+    {
+        return $this->schemas[$name] ?? throw new \InvalidArgumentException(
             "Unknown collection \"{$name}\". Collections: " . (implode(', ', array_keys($this->schemas)) ?: 'none') . ' (config/collections.php).',
         );
-
-        return new Collection($schema, fn (?string $language) => $this->compiled()[$language ?? $this->site->language()][$name] ?? []);
     }
 
     /** @return list<string> collections with a JSON export */
@@ -82,38 +114,6 @@ final class Collections implements \ArrayAccess, \IteratorAggregate, \Countable
         $this->items = $items;
 
         return array_map('count', $items[$this->site->defaultLanguage] ?? []);
-    }
-
-    public function offsetExists(mixed $offset): bool
-    {
-        return isset($this->schemas[$offset]);
-    }
-
-    public function offsetGet(mixed $offset): Collection
-    {
-        return $this->get((string) $offset);
-    }
-
-    public function offsetSet(mixed $offset, mixed $value): never
-    {
-        throw new \LogicException('Collections are defined in config/collections.php.');
-    }
-
-    public function offsetUnset(mixed $offset): never
-    {
-        throw new \LogicException('Collections are defined in config/collections.php.');
-    }
-
-    public function getIterator(): \Generator
-    {
-        foreach (array_keys($this->schemas) as $name) {
-            yield $name => $this->get($name);
-        }
-    }
-
-    public function count(): int
-    {
-        return count($this->schemas);
     }
 
     /** @return array<string, array<string, array<string, array<string, mixed>>>> */
