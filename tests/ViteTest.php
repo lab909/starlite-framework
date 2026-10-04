@@ -33,6 +33,18 @@ final class ViteTest extends FrameworkTestCase
         ]), $tags);
     }
 
+    public function testListsOfEntriesAreFlattenedAndPrintedOnce(): void
+    {
+        $vite = new Vite($this->root(), $this->tempDir('cache'), false);
+
+        // The layout's `vite('resources/js/app.js', page_scripts ?? [])`, with and without page scripts.
+        self::assertSame(
+            $vite->tags('resources/js/app.js', 'resources/css/print.css'),
+            $vite->tags('resources/js/app.js', ['resources/css/print.css', 'resources/js/app.js']),
+        );
+        self::assertSame($vite->tags('resources/js/app.js'), $vite->tags('resources/js/app.js', []));
+    }
+
     public function testDevServerIsUsedOnlyInDebugMode(): void
     {
         $root = $this->root();

@@ -8,7 +8,8 @@ use Twig\Extension\AbstractExtension;
 use Twig\TwigFunction;
 
 /**
- * `{{ vite('resources/js/app.js') }}` prints the tags for a Vite entry point.
+ * `{{ vite('resources/js/app.js') }}` prints the tags for Vite entry points. Lists work too, so the
+ * layout can add the page's own bundles: `{{ vite('resources/js/app.js', page_scripts ?? []) }}`.
  *
  * - Debug + `npm run dev` running: points at the Vite dev server (URL read from var/vite.hot).
  * - Otherwise: reads public/build/.vite/manifest.json (compiled into var/cache/vite.php)
@@ -32,8 +33,10 @@ final class Vite extends AbstractExtension
         return [new TwigFunction('vite', $this->tags(...), ['is_safe' => ['html']])];
     }
 
-    public function tags(string ...$entries): string
+    /** @param string|list<string> ...$entries entries, or lists of entries; duplicates are printed once */
+    public function tags(string|array ...$entries): string
     {
+        $entries = array_values(array_unique(array_merge(...array_map(fn (string|array $entry): array => (array) $entry, $entries))));
         $devServer = $this->devServer();
         if ($devServer !== null) {
             $tags = [self::script($devServer . '/@vite/client')];

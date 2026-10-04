@@ -31,6 +31,7 @@ final class Kernel
     public readonly Router $router;
     public readonly Blog $blog;
     public readonly Vite $vite;
+    public readonly PublicConfig $publicConfig;
     public readonly Seo $seo;
     public readonly Site $site;
     public readonly Translations $translations;
@@ -78,6 +79,7 @@ final class Kernel
             $config['blog']['per_page'],
             $config['content_dir'] ?? null,
             $config['cache_dir'] ?? null,
+            $config['public'] ?? [],
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -101,6 +103,7 @@ final class Kernel
         }
     }
 
+    /** @param array<string, mixed> $public config values the browser may read (config/app.php `public`) */
     public function __construct(
         public readonly string $root,
         string $secret,
@@ -109,6 +112,7 @@ final class Kernel
         int $postsPerPage = 20,
         ?string $contentDir = null,
         ?string $cacheDir = null,
+        array $public = [],
     ) {
         $this->cacheDir = $cacheDir ?? $root . '/var/cache';
         $contentDir ??= $root . '/content';
@@ -118,6 +122,7 @@ final class Kernel
         $this->router = new Router($this->cacheDir, $debug);
         $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
+        $this->publicConfig = new PublicConfig($public, $secret);
         $this->datastar = new Datastar($secret, $this->site);
         $this->seo = new Seo($this->site);
         $this->requests = new RequestStack();
@@ -131,6 +136,7 @@ final class Kernel
         ]);
         $this->twig->addExtension($this->datastar);
         $this->twig->addExtension($this->vite);
+        $this->twig->addExtension($this->publicConfig);
         $this->twig->addExtension($this->seo);
         $this->twig->addExtension($this->site);
         $this->twig->addExtension($this->translations);

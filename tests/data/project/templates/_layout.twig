@@ -3,6 +3,7 @@
 <head>
 {% block seo %}{% endblock %}
 {{ seo_tags() }}
+{{ public_config() }}
 </head>
 <body>
 <nav>{% for l in language_switcher() %}<a class="lang{{ l.active ? ' active' }}" href="{{ l.url }}" data-available="{{ l.available ? 'yes' : 'no' }}">{{ l.code }}</a>{% endfor %}</nav>
