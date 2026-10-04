@@ -67,7 +67,7 @@ final class ConsoleTest extends FrameworkTestCase
         self::assertSame(Command::SUCCESS, $tester->getStatusCode());
         preg_match_all('/^\s{2}(\S+)/m', $tester->getDisplay(), $rows);
         self::assertSame(
-            ['Step', 'composer', 'cache', 'fixture-closure', 'routes', 'blog', 'collections', 'translations', 'templates', 'vite', 'fixture-command', 'opcache'],
+            ['Step', 'composer', 'cache', 'fixture-closure', 'routes', 'blog', 'pages', 'collections', 'translations', 'templates', 'vite', 'fixture-command', 'opcache'],
             $rows[1],
         );
         self::assertStringContainsString('vite (skipped)', $tester->getDisplay());
@@ -140,12 +140,13 @@ final class ConsoleTest extends FrameworkTestCase
     public function testCacheClearKeepsGitkeep(): void
     {
         $root = $this->project();
-        self::write($root, ['var/cache/.gitkeep' => '', 'var/cache/x/y.php' => '<?php', 'public/media/blog/a/b.png' => 'x']);
+        self::write($root, ['var/cache/.gitkeep' => '', 'var/cache/x/y.php' => '<?php', 'public/media/blog/a/b.png' => 'x', 'public/media/pages/about/c.png' => 'x']);
         $tester = new CommandTester($this->console($root)->find('cache:clear'));
 
         self::assertSame(Command::SUCCESS, $tester->execute([]));
         self::assertSame(['.gitkeep'], array_values(array_diff((array) scandir("{$root}/var/cache"), ['.', '..'])));
         self::assertSame([], array_values(array_diff((array) scandir("{$root}/public/media/blog"), ['.', '..'])));
+        self::assertSame([], array_values(array_diff((array) scandir("{$root}/public/media/pages"), ['.', '..'])));
     }
 
     public function testCacheClearRestoresTheDevelopmentAutoloaderAfterADeploy(): void

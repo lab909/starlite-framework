@@ -6,13 +6,14 @@ namespace Starlite\Console;
 
 use Starlite\Blog\Blog;
 use Starlite\Cache;
+use Starlite\Pages\Pages;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
-#[AsCommand('cache:clear', 'Deletes var/cache and the blog files published to public/media/blog (run it when going back to development).')]
+#[AsCommand('cache:clear', 'Deletes var/cache and the post and page files published to public/media/ (run it when going back to development).')]
 final class CacheClearCommand extends Command
 {
     public function __construct(private readonly string $root)
@@ -30,7 +31,8 @@ final class CacheClearCommand extends Command
         Cache::clear($this->root . '/var/cache');
         // Published copies would shadow the post folders: nginx serves public/ before PHP is reached.
         Cache::clear($this->root . '/public' . Blog::ASSET_URL);
-        $output->writeln('<info>var/cache and public' . Blog::ASSET_URL . ' cleared.</info>');
+        Cache::clear($this->root . '/public' . Pages::ASSET_URL);
+        $output->writeln('<info>var/cache, public' . Blog::ASSET_URL . ' and public' . Pages::ASSET_URL . ' cleared.</info>');
 
         // deploy's authoritative class map only knows the classes that existed then: in development a
         // new controller or command would be "not found". Back to the normal autoloader.

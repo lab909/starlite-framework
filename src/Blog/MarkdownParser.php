@@ -95,7 +95,7 @@ final class MarkdownParser
 
         $this->current = [dirname($path), $assetUrl, $source];
         try {
-            $result = $this->converter->convert($markdown);
+            $result = $this->convertMarkdown($markdown, $source);
         } finally {
             $this->current = null;
         }
@@ -146,6 +146,28 @@ final class MarkdownParser
     }
 
     /**
+     * Front matter and HTML of a Markdown file whose relative links and images point at files in its
+     * own folder (content pages), rewritten to $assetUrl like a post's.
+     *
+     * @return array{mixed, string} front matter (null without one), HTML
+     */
+    public function convertFile(string $path, string $assetUrl, string $source): array
+    {
+        $markdown = file_get_contents($path);
+        if ($markdown === false) {
+            throw new \RuntimeException("Cannot read {$path}.");
+        }
+        $this->current = [dirname($path), $assetUrl, $source];
+        try {
+            $result = $this->convertMarkdown($markdown, $source);
+        } finally {
+            $this->current = null;
+        }
+
+        return [$result instanceof RenderedContentWithFrontMatter ? $result->getFrontMatter() : null, $result->getContent()];
+    }
+
+    /**
      * Front matter and HTML of Markdown outside a post folder (data collections). Relative links to
      * files are refused there: collections have no folder of their own to publish.
      *
@@ -155,12 +177,23 @@ final class MarkdownParser
     {
         $this->current = [null, null, $source];
         try {
-            $result = $this->converter->convert($markdown);
+            $result = $this->convertMarkdown($markdown, $source);
         } finally {
             $this->current = null;
         }
 
         return [$result instanceof RenderedContentWithFrontMatter ? $result->getFrontMatter() : null, $result->getContent()];
+    }
+
+    /** Converts Markdown; a YAML error in the front matter names the file, like every other content error. */
+    private function convertMarkdown(string $markdown, string $source): \League\CommonMark\Output\RenderedContentInterface
+    {
+        try {
+            return $this->converter->convert($markdown);
+        } catch (\League\CommonMark\Extension\FrontMatter\Exception\InvalidFrontMatterException $e) {
+            $reason = $e->getPrevious()?->getMessage() ?? $e->getMessage();
+            throw new \RuntimeException("{$source}: invalid YAML front matter: {$reason} (values containing \": \" need quotes)", 0, $e);
+        }
     }
 
     /** `![x](cover.jpg)` / `[pdf](files/report.pdf)` → the post's asset URL; the file must exist. */
@@ -187,7 +220,7 @@ final class MarkdownParser
                 throw new \RuntimeException("{$source}: \"{$url}\" is a relative link; use a /path (a file in public/) or a full URL.");
             }
             if (!is_file($dir . '/' . $path)) {
-                throw new \RuntimeException("{$source}: \"{$url}\" not found in the post folder.");
+                throw new \RuntimeException("{$source}: \"{$url}\" not found in its folder.");
             }
             if (!isset(Blog::ASSET_TYPES[strtolower(pathinfo($path, PATHINFO_EXTENSION))])) {
                 throw new \RuntimeException("{$source}: \"{$url}\" is not a publishable file type (" . implode(', ', array_keys(Blog::ASSET_TYPES)) . ').');
@@ -226,7 +259,8 @@ final class MarkdownParser
         throw new \RuntimeException("{$source}: front matter needs a \"{$field}\" in YYYY-MM-DD format.");
     }
 
-    private static function image(mixed $value, string $dir, string $assetUrl, string $source): ?string
+    /** A share image from front matter: a file in the folder (→ its asset URL), a /path or an https URL. */
+    public static function image(mixed $value, string $dir, string $assetUrl, string $source): ?string
     {
         if ($value === null || $value === '') {
             return null;
@@ -243,7 +277,7 @@ final class MarkdownParser
             throw new \RuntimeException("{$source}: {$e->getMessage()}");
         }
         if ($path === null || !is_file($dir . '/' . $path)) {
-            throw new \RuntimeException("{$source}: image \"{$value}\" not found in the post folder.");
+            throw new \RuntimeException("{$source}: image \"{$value}\" not found in its folder.");
         }
         if (!isset(Blog::ASSET_TYPES[strtolower(pathinfo($path, PATHINFO_EXTENSION))])) {
             throw new \RuntimeException("{$source}: image \"{$value}\" is not a publishable file type.");
@@ -252,7 +286,8 @@ final class MarkdownParser
         return $assetUrl . '/' . $path;
     }
 
-    private static function firstParagraph(string $html): string
+    /** The first paragraph with text, up to 200 characters: the default summary. */
+    public static function firstParagraph(string $html): string
     {
         // The first paragraph with text: a post may open with an image-only paragraph.
         preg_match_all('#<p>(.*?)</p>#s', $html, $matches);

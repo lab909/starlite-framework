@@ -8,8 +8,8 @@ use Starlite\Controller;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * /sitemap.xml: in every language, the static GET pages (no placeholders, no file extension) and
- * the published blog posts written in that language.
+ * /sitemap.xml: in every language, the static GET pages (no placeholders, no file extension), the
+ * content pages and the published blog posts written in that language.
  */
 final class SitemapController extends Controller
 {
@@ -31,6 +31,10 @@ final class SitemapController extends Controller
                     continue;
                 }
                 self::url($xml, $this->app->seo->url($this->app->site->localize($path, $language)));
+            }
+
+            foreach ($this->app->pages()->language($language) as $page) {
+                self::url($xml, $this->app->seo->url($this->app->path('page', ['path' => $page['path']], $language)), $page['updated']);
             }
 
             foreach ($this->app->posts()->language($language) as $post) {

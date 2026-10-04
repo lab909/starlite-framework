@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Starlite\Console;
 
 use Starlite\Blog\Blog;
+use Starlite\Pages\Pages;
 use Starlite\Cache;
 use Starlite\Kernel;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -25,6 +26,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *   cache         empty var/cache
  *   routes        compile the router
  *   blog          compile the posts and copy their files to public/media/blog/
+ *   pages         compile the content pages and copy their files to public/media/pages/
  *   collections   compile the data collections
  *   translations  compile the translation catalogues
  *   templates     compile every Twig template
@@ -179,6 +181,19 @@ final class DeployCommand extends Command
             [$posts, $versions] = $app->blog->warmup();
             $io->writeln(sprintf(' ✔ %d blog posts compiled (%d language versions)', $posts, $versions));
             $io->writeln(sprintf(' ✔ %d post files published to public%s/', $app->blog->publishAssets($this->root . '/public'), Blog::ASSET_URL));
+        }];
+        $steps['pages'] = ['description' => 'Compile the content pages and publish their files to public' . Pages::ASSET_URL . '/', 'run' => function () use ($io, $app) {
+            [$pages, $versions] = $app->pages->warmup();
+            $shadowed = $app->shadowedPages();
+            if ($shadowed !== []) {
+                foreach ($shadowed as $path => $route) {
+                    $io->error("content/pages/{$path}/ can never be shown: the route \"{$route}\" answers /{$path} first. Rename the folder or the route.");
+                }
+
+                return false;
+            }
+            $io->writeln(sprintf(' ✔ %d content pages compiled (%d language versions)', $pages, $versions));
+            $io->writeln(sprintf(' ✔ %d page files published to public%s/', $app->pages->publishAssets($this->root . '/public'), Pages::ASSET_URL));
         }];
         $steps['collections'] = ['description' => 'Compile the data collections', 'run' => static function () use ($io, $app) {
             $counts = $app->collections->warmup();

@@ -6,6 +6,7 @@ namespace Starlite;
 
 use Starlite\Blog\Blog;
 use Starlite\Collections\Collections;
+use Starlite\Pages\Pages;
 use Starlite\Seo\Seo;
 use starfederation\datastar\Consts;
 use Symfony\Component\Dotenv\Dotenv;
@@ -26,7 +27,10 @@ use Twig\Extra\Intl\IntlExtension;
 use Twig\Loader\FilesystemLoader;
 use Twig\TwigFunction;
 
-/** @phpstan-import-type Post from \Starlite\Blog\MarkdownParser */
+/**
+ * @phpstan-import-type Post from \Starlite\Blog\MarkdownParser
+ * @phpstan-import-type Page from \Starlite\Pages\Pages
+ */
 final class Kernel
 {
     public readonly Environment $twig;
@@ -34,6 +38,7 @@ final class Kernel
     public readonly Router $router;
     public readonly Blog $blog;
     public readonly Collections $collections;
+    public readonly Pages $pages;
     public readonly Vite $vite;
     public readonly PublicConfig $publicConfig;
     public readonly Csp $csp;
@@ -138,6 +143,7 @@ final class Kernel
         $this->translations = new Translations($root . '/translations', $this->site, $debug ? null : $this->cacheDir . '/translations', $debug);
         $this->router = new Router($this->cacheDir, $debug);
         $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site);
+        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site);
         $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->publicConfig = new PublicConfig($public, $secret);
@@ -162,9 +168,10 @@ final class Kernel
         $this->twig->addExtension($this->translations);
         $this->twig->addExtension(new IntlExtension()); // format_date / format_number, localized with site.locale
         $this->twig->addFunction(new TwigFunction('path', $this->path(...)));
-        // Content is queried, not injected: posts() and collection('faq') return a Starlite\Query.
+        // Content is queried, not injected: posts(), pages() and collection('faq') return a Starlite\Query.
         $this->twig->addFunction(new TwigFunction('posts', $this->posts(...)));
         $this->twig->addFunction(new TwigFunction('collection', $this->collection(...)));
+        $this->twig->addFunction(new TwigFunction('pages', $this->pages(...)));
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
         $this->route(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/datastar', $this->renderDatastarTemplate(...), 'datastar');
@@ -193,6 +200,39 @@ final class Kernel
     }
 
     /**
+     * A query over the content pages, sorted by path: `$app->pages()->where('parent', '')->orderBy('order, title')->all()`.
+     *
+     * @return Query<Page>
+     */
+    public function pages(): Query
+    {
+        return $this->pages->query();
+    }
+
+    /**
+     * Pages whose URL another route answers first, so they can never be shown (e.g. content/pages/blog/
+     * behind the blog route): path => route name. `deploy` refuses to run while there are any.
+     *
+     * @return array<string, string>
+     */
+    public function shadowedPages(): array
+    {
+        $paths = [];
+        foreach (array_keys($this->site->languages) as $language) {
+            $paths += $this->pages->items($language); // also pages that only exist in other languages
+        }
+        $shadowed = [];
+        foreach (array_keys($paths) as $path) {
+            $route = $this->router->routeName('/' . $path);
+            if ($route !== null && $route !== 'page') {
+                $shadowed[$path] = $route;
+            }
+        }
+
+        return $shadowed;
+    }
+
+    /**
      * A query over a data collection (config/collections.php): `$app->collection('faq')->all()`.
      *
      * @return Query<array<string, mixed>>
@@ -211,6 +251,9 @@ final class Kernel
      * @param string|list<string>                                  $methods
      * @param \Closure|array{class-string, string}|class-string     $handler
      * @param array<string, string>                                $requirements regex per placeholder, e.g. ['slug' => '[a-z0-9-]+']
+     * @param int                                                  $priority     higher is tried first (default 0); a negative
+     *                                                                           priority keeps a catch-all such as the content
+     *                                                                           pages after every other route
      */
     public function route(
         string|array $methods,
@@ -219,17 +262,18 @@ final class Kernel
         ?string $name = null,
         array $requirements = [],
         bool $csrf = true,
+        int $priority = 0,
     ): void {
-        $this->router->add((array) $methods, $path, $handler, $name, $requirements, $csrf);
+        $this->router->add((array) $methods, $path, $handler, $name, $requirements, $csrf, $priority);
     }
 
     /**
      * @param \Closure|array{class-string, string}|class-string $handler
      * @param array<string, string> $requirements
      */
-    public function get(string $path, \Closure|array|string $handler, ?string $name = null, array $requirements = []): void
+    public function get(string $path, \Closure|array|string $handler, ?string $name = null, array $requirements = [], int $priority = 0): void
     {
-        $this->route('GET', $path, $handler, $name, $requirements);
+        $this->route('GET', $path, $handler, $name, $requirements, priority: $priority);
     }
 
     /**

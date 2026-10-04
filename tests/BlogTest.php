@@ -198,10 +198,11 @@ final class BlogTest extends FrameworkTestCase
         yield 'malformed date' => [['2026/09/baddate/index.md' => "---\ntitle: X\ndate: 09/01/2026\n---\nx"], 'front matter needs a "date" in YYYY-MM-DD format'];
         yield 'old slug field' => [['2026/09/old/index.md' => "---\ntitle: X\ndate: 2026-09-01\nslug: other\n---\nx"], '"slug" is no longer a front matter field: rename the post folder instead'];
         yield 'old draft field' => [['2026/09/old/index.md' => "---\ntitle: X\ndate: 2026-09-01\ndraft: true\n---\nx"], '"draft" is no longer a front matter field'];
-        yield 'missing linked file' => [['2026/09/img/index.md' => "---\ntitle: X\ndate: 2026-09-01\n---\n![a](nope.png)"], '"nope.png" not found in the post folder'];
+        yield 'invalid yaml' => [['2026/09/yaml/index.md' => "---\ntitle: Note: this breaks\ndate: 2026-09-01\n---\nx"], '2026/09/yaml/index.md: invalid YAML front matter:'];
+        yield 'missing linked file' => [['2026/09/img/index.md' => "---\ntitle: X\ndate: 2026-09-01\n---\n![a](nope.png)"], '"nope.png" not found in its folder'];
         yield 'link escaping the folder' => [['2026/09/esc/index.md' => "---\ntitle: X\ndate: 2026-09-01\n---\n![a](../alpha/cover.png)"], 'must stay inside the post folder'];
         yield 'link to unpublishable type' => [['2026/09/zip/index.md' => "---\ntitle: X\ndate: 2026-09-01\n---\n[a](a.zip)", '2026/09/zip/a.zip' => 'x'], 'is not a publishable file type'];
-        yield 'missing image' => [['2026/09/noimg/index.md' => "---\ntitle: X\ndate: 2026-09-01\nimage: nope.jpg\n---\nx"], 'image "nope.jpg" not found in the post folder'];
+        yield 'missing image' => [['2026/09/noimg/index.md' => "---\ntitle: X\ndate: 2026-09-01\nimage: nope.jpg\n---\nx"], 'image "nope.jpg" not found in its folder'];
         yield 'bad asset file name' => [['2026/09/names/index.md' => $post, '2026/09/names/my photo.jpg' => 'x'], 'file names may only use letters, digits, dots, dashes and underscores'];
         yield 'duplicate slug' => [['2026/08/beta/index.md' => "---\ntitle: X\ndate: 2026-08-01\n---\nx"], 'Duplicate slug "beta"'];
         yield 'default language with a code' => [['2026/09/alpha/index.en.md' => $post], 'the default language (en) is index.md, without a language code'];

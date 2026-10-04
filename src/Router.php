@@ -42,6 +42,7 @@ final class Router
      * @param list<string>                                         $methods
      * @param \Closure|array{class-string, string}|class-string    $handler
      * @param array<string, string>                                $requirements e.g. ['slug' => '[a-z0-9-]+']
+     * @param int                                                  $priority     higher first; equal priorities in the order added
      */
     public function add(
         array $methods,
@@ -50,10 +51,11 @@ final class Router
         ?string $name = null,
         array $requirements = [],
         bool $csrf = true,
+        int $priority = 0,
     ): void {
         $methods = array_map('strtoupper', $methods);
         $name ??= strtolower(implode('_', $methods)) . '_' . trim((string) preg_replace('/\W+/', '_', $path), '_');
-        $this->routes->add($name, new Route($path, ['_csrf' => $csrf], $requirements, methods: $methods));
+        $this->routes->add($name, new Route($path, ['_csrf' => $csrf], $requirements, methods: $methods), $priority);
         $this->handlers[$name] = $handler;
     }
 
@@ -74,6 +76,17 @@ final class Router
         $args = array_filter($params, static fn ($key) => !str_starts_with($key, '_'), ARRAY_FILTER_USE_KEY);
 
         return [$handler, $args, $csrf];
+    }
+
+    /** The name of the route a GET request for $path would reach, or null if none matches. */
+    public function routeName(string $path): ?string
+    {
+        $this->context->setMethod('GET');
+        try {
+            return (string) $this->matcher()->match($path)['_route'];
+        } catch (\Symfony\Component\Routing\Exception\ExceptionInterface) {
+            return null;
+        }
     }
 
     /** @param array<string, mixed> $params */

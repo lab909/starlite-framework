@@ -7,6 +7,9 @@ use Starlite\Blog\Blog;
 use Starlite\Blog\FeedController;
 use Starlite\Blog\PostSeo;
 use Starlite\Kernel;
+use Starlite\Pages\AssetController as PageAssetController;
+use Starlite\Pages\PageSeo;
+use Starlite\Pages\Pages;
 use Starlite\Seo\RobotsController;
 use Starlite\Seo\SitemapController;
 use Starlite\Tests\Fixtures\Controller\DemoController;
@@ -44,4 +47,21 @@ return static function (Kernel $app): void {
 
     $app->get('/sitemap.xml', SitemapController::class, 'sitemap');
     $app->get('/robots.txt', RobotsController::class, 'robots');
+
+    // Content pages, built like an app's PageController. The catch-all comes last: other routes win.
+    $app->get(Pages::ASSET_URL . '/{file}', PageAssetController::class, 'page_asset', ['file' => '.+']);
+    $app->get('/{path}', static function (string $path) use ($app) {
+        $alternates = [];
+        foreach ($app->pages->translations($path) as $language) {
+            $alternates[$language] = $app->path('page', ['path' => $path], $language);
+        }
+        $app->site->setAlternates($alternates);
+        $page = $app->pages()->where('path', $path)->one();
+        if ($page === null) {
+            return $app->error(404, $app->t('Not found.')); // also every unknown URL: the same 404 as without pages
+        }
+        PageSeo::apply($app->seo, $page);
+
+        return $app->render($page['template'] ?? 'content-page.twig', ['page' => $page]);
+    }, 'page', ['path' => Pages::PATH], priority: -1);
 };
