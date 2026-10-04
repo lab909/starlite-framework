@@ -25,6 +25,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *   cache         empty var/cache
  *   routes        compile the router
  *   blog          compile the posts and copy their files to public/media/blog/
+ *   collections   compile the data collections
  *   translations  compile the translation catalogues
  *   templates     compile every Twig template
  *   vite          cache the Vite manifest
@@ -178,6 +179,10 @@ final class DeployCommand extends Command
             [$posts, $versions] = $app->blog->warmup();
             $io->writeln(sprintf(' ✔ %d blog posts compiled (%d language versions)', $posts, $versions));
             $io->writeln(sprintf(' ✔ %d post files published to public%s/', $app->blog->publishAssets($this->root . '/public'), Blog::ASSET_URL));
+        }];
+        $steps['collections'] = ['description' => 'Compile the data collections', 'run' => static function () use ($io, $app) {
+            $counts = $app->collections->warmup();
+            $io->writeln(sprintf(' ✔ %d data collection%s compiled (%d items)', count($counts), count($counts) === 1 ? '' : 's', array_sum($counts)));
         }];
         $steps['translations'] = ['description' => 'Compile the translation catalogues', 'run' => static function () use ($io, $app) {
             $io->writeln(sprintf(' ✔ translations compiled for %d languages', $app->translations->warmup()));

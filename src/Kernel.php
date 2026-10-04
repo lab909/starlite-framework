@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Starlite;
 
 use Starlite\Blog\Blog;
+use Starlite\Collections\Collections;
 use Starlite\Seo\Seo;
 use starfederation\datastar\Consts;
 use Symfony\Component\Dotenv\Dotenv;
 use Symfony\Component\ErrorHandler\Debug;
 use Symfony\Component\ErrorHandler\ErrorHandler;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -30,6 +32,7 @@ final class Kernel
     public readonly Datastar $datastar;
     public readonly Router $router;
     public readonly Blog $blog;
+    public readonly Collections $collections;
     public readonly Vite $vite;
     public readonly PublicConfig $publicConfig;
     public readonly Csp $csp;
@@ -86,6 +89,7 @@ final class Kernel
                 $config['csp']['report_only'] ?? false,
                 $config['csp']['sources'] ?? [],
             ),
+            $config['collections'] ?? (is_file($root . '/config/collections.php') ? require $root . '/config/collections.php' : []),
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -112,6 +116,7 @@ final class Kernel
     /**
      * @param array<string, mixed> $public config values the browser may read (config/app.php `public`)
      * @param Csp|null             $csp    Content Security Policy; strict defaults when null
+     * @param array<string, array<mixed>> $collections data collection definitions (config/collections.php)
      */
     public function __construct(
         public readonly string $root,
@@ -123,6 +128,7 @@ final class Kernel
         ?string $cacheDir = null,
         array $public = [],
         ?Csp $csp = null,
+        array $collections = [],
     ) {
         $this->cacheDir = $cacheDir ?? $root . '/var/cache';
         $contentDir ??= $root . '/content';
@@ -130,6 +136,7 @@ final class Kernel
         $this->container = new Container($this);
         $this->translations = new Translations($root . '/translations', $this->site, $debug ? null : $this->cacheDir . '/translations', $debug);
         $this->router = new Router($this->cacheDir, $debug);
+        $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site);
         $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->publicConfig = new PublicConfig($public, $secret);
@@ -155,9 +162,20 @@ final class Kernel
         $this->twig->addExtension(new IntlExtension()); // format_date / format_number, localized with site.locale
         $this->twig->addFunction(new TwigFunction('path', $this->path(...)));
         $this->twig->addGlobal('blog', $this->blog);
+        $this->twig->addGlobal('collections', $this->collections);
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
         $this->route(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/datastar', $this->renderDatastarTemplate(...), 'datastar');
+
+        // Collections with `json` in config/collections.php, for JavaScript: /data/faq.json (/it/data/faq.json).
+        if ($this->collections->exported() !== []) {
+            $this->get(
+                '/data/{collection}.json',
+                fn (string $collection) => new JsonResponse($this->collections->get($collection)->json()),
+                'collection_json',
+                ['collection' => implode('|', array_map(preg_quote(...), $this->collections->exported()))],
+            );
+        }
     }
 
     // --- Routing --------------------------------------------------------------

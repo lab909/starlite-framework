@@ -41,7 +41,7 @@ final class MarkdownParser
 {
     private readonly MarkdownConverter $converter;
 
-    /** @var array{string, string, string}|null post being converted, for the link rewriter: [folder on disk, public asset URL, source] */
+    /** @var array{?string, ?string, string}|null file being converted, for the link rewriter: [post folder on disk, public asset URL, source]; no folder outside the blog */
     private ?array $current = null;
 
     public function __construct()
@@ -129,7 +129,7 @@ final class MarkdownParser
                 $draft => gmdate('Y-m-d'), // a draft without a date sorts as if published today
                 default => self::date(null, $source),
             },
-            'updated' => isset($meta['updated']) ? self::date($meta['updated'], $source) : $original['updated'] ?? null,
+            'updated' => isset($meta['updated']) ? self::date($meta['updated'], $source, 'updated') : $original['updated'] ?? null,
             'image' => array_key_exists('image', $meta)
                 ? self::image($meta['image'], dirname($path), $assetUrl, $source)
                 : $original['image'] ?? null,
@@ -143,6 +143,24 @@ final class MarkdownParser
             'source' => $source,
             'assets' => [],
         ];
+    }
+
+    /**
+     * Front matter and HTML of Markdown outside a post folder (data collections). Relative links to
+     * files are refused there: collections have no folder of their own to publish.
+     *
+     * @return array{mixed, string} front matter (null without one), HTML
+     */
+    public function convert(string $markdown, string $source): array
+    {
+        $this->current = [null, null, $source];
+        try {
+            $result = $this->converter->convert($markdown);
+        } finally {
+            $this->current = null;
+        }
+
+        return [$result instanceof RenderedContentWithFrontMatter ? $result->getFrontMatter() : null, $result->getContent()];
     }
 
     /** `![x](cover.jpg)` / `[pdf](files/report.pdf)` → the post's asset URL; the file must exist. */
@@ -164,6 +182,9 @@ final class MarkdownParser
             }
             if ($path === null) {
                 continue;
+            }
+            if ($dir === null) {
+                throw new \RuntimeException("{$source}: \"{$url}\" is a relative link; use a /path (a file in public/) or a full URL.");
             }
             if (!is_file($dir . '/' . $path)) {
                 throw new \RuntimeException("{$source}: \"{$url}\" not found in the post folder.");
@@ -190,7 +211,7 @@ final class MarkdownParser
     }
 
     /** YAML turns an unquoted `2026-10-01` into a UTC timestamp; a quoted one stays a string. */
-    private static function date(mixed $value, string $source): string
+    public static function date(mixed $value, string $source, string $field = 'date'): string
     {
         if (is_int($value)) {
             return gmdate('Y-m-d', $value);
@@ -202,7 +223,7 @@ final class MarkdownParser
             return $date->format('Y-m-d');
         }
 
-        throw new \RuntimeException("{$source}: front matter needs a \"date\" in YYYY-MM-DD format.");
+        throw new \RuntimeException("{$source}: front matter needs a \"{$field}\" in YYYY-MM-DD format.");
     }
 
     private static function image(mixed $value, string $dir, string $assetUrl, string $source): ?string
