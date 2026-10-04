@@ -148,6 +148,32 @@ final class ConsoleTest extends FrameworkTestCase
         self::assertSame([], array_values(array_diff((array) scandir("{$root}/public/media/blog"), ['.', '..'])));
     }
 
+    public function testCacheClearRestoresTheDevelopmentAutoloaderAfterADeploy(): void
+    {
+        $root = $this->project();
+        // A stand-in for Composer that records how it was called.
+        self::write($root, ['bin/fake-composer' => "#!/bin/sh\necho \"\$@\" >> composer.log\nexit \${FAKE_EXIT:-0}\n"]);
+        chmod("{$root}/bin/fake-composer", 0755);
+        $run = fn (): int => (new CommandTester($this->console($root)->find('cache:clear')))->execute(['--composer' => "{$root}/bin/fake-composer"]);
+
+        // Normal autoloader: Composer isn't called.
+        self::write($root, ['vendor/composer/autoload_real.php' => '<?php // $loader->register(true);']);
+        self::assertSame(Command::SUCCESS, $run());
+        self::assertFileDoesNotExist("{$root}/composer.log");
+
+        // deploy's authoritative class map: rebuilt without it.
+        self::write($root, ['vendor/composer/autoload_real.php' => '<?php $loader->setClassMapAuthoritative(true);']);
+        self::assertSame(Command::SUCCESS, $run());
+        self::assertSame("dump-autoload --no-interaction --quiet\n", file_get_contents("{$root}/composer.log"));
+
+        putenv('FAKE_EXIT=1');
+        try {
+            self::assertSame(Command::FAILURE, $run());
+        } finally {
+            putenv('FAKE_EXIT');
+        }
+    }
+
     /** A writable copy of the fixture project, with the fixture content inside it. */
     private function project(): string
     {

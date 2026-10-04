@@ -137,6 +137,7 @@ final class Kernel
         $this->twig->addExtension($this->datastar);
         $this->twig->addExtension($this->vite);
         $this->twig->addExtension($this->publicConfig);
+        $this->twig->addExtension(new Theme());
         $this->twig->addExtension($this->seo);
         $this->twig->addExtension($this->site);
         $this->twig->addExtension($this->translations);

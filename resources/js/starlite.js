@@ -1,12 +1,12 @@
 // Browser helpers for page modules that work alongside Datastar. Import them through the alias the
 // Vite plugin sets up:
 //
-//   import { persist, publicConfig, ready } from 'starlite';
+//   import { persist, publicConfig, ready, theme } from 'starlite';
 //   import { effect, getPath, mergePatch } from 'datastar';
 //
 // The pattern: Datastar drives the UI through signals; a plain module does the heavy work (audio,
 // canvas, maps…), reading signals inside effect() and writing results back with mergePatch().
-import { effect, filtered, mergePatch } from 'datastar';
+import { effect, filtered, getPath, mergePatch } from 'datastar';
 
 /**
  * Resolves once Datastar has applied the page's data-* attributes (its `datastar-ready` event).
@@ -75,6 +75,31 @@ export function publicConfig() {
     } catch {
         return {};
     }
+}
+
+/**
+ * Light / dark / system theme, driven by the `_theme` signal ('light', 'dark' or 'system'; anything
+ * else counts as 'system'). Call it once on every page (resources/js/app.js) and bind a control to
+ * the signal, e.g. radio buttons with `data-bind:_theme`.
+ *
+ * It saves the choice, sets `<html data-theme="light|dark">` whenever the choice changes, and in
+ * 'system' mode follows the operating system as it switches (e.g. at sunset). The first paint is
+ * handled by `{{ theme_script() }}` in <head>, which reads the same storage key (src/Theme.php):
+ * keep the two in step.
+ *
+ * @returns {Promise<void>} resolves once the saved choice is restored
+ */
+export async function theme() {
+    const media = matchMedia('(prefers-color-scheme: dark)');
+    // Restored before the first apply(), so the theme set by the <head> script never flickers.
+    await persist(['_theme'], { key: 'starlite-theme' });
+
+    const apply = () => {
+        const choice = getPath('_theme');
+        document.documentElement.dataset.theme = choice === 'light' || choice === 'dark' ? choice : media.matches ? 'dark' : 'light';
+    };
+    effect(apply);
+    media.addEventListener('change', apply);
 }
 
 /** ['_mixer.volume', 'theme'] → /^(_mixer\.volume|theme)(\.|$)/: each path plus everything under it. */
