@@ -51,7 +51,8 @@ export default function starlite({ input = ['resources/js/app.js'], reload = [] 
                         cors: server.cors ?? { origin: process.env.DDEV_PRIMARY_URL ?? /^https?:\/\/localhost(:\d+)?$/ },
                         // Anchored to the project root: a bare '**/var/**' would also match the root itself
                         // (/var/www/html) and silently stop all file watching. Merged with the app's own list.
-                        watch: { ignored: ['vendor', 'var', '.ddev', 'node_modules'].map((dir) => path.resolve(dir) + '/**') },
+                        // docs/ is the documentation submodule: a separate VitePress site.
+                        watch: { ignored: ['vendor', 'var', '.ddev', 'node_modules', 'docs'].map((dir) => path.resolve(dir) + '/**') },
                     },
                 };
             },

@@ -73,7 +73,7 @@ abstract class Controller
         return $this->app->t($message, $params);
     }
 
-        protected function notFound(string $message = 'Not found.'): Response
+    protected function notFound(string $message = 'Not found.'): Response
     {
         return $this->app->error(404, $message);
     }
