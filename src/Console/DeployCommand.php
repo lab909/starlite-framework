@@ -248,20 +248,27 @@ final class DeployCommand extends Command
         return $steps;
     }
 
+    /** Compiles every template the site can use: its own, packages' and the framework's (overridden ones once). */
     private function compileTemplates(Kernel $app): int
     {
-        $dir = $this->root . '/templates';
-        $count = 0;
-        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
-        foreach ($files as $file) {
-            if ($file->getExtension() !== 'twig') {
+        $loader = $app->twig->getLoader();
+        $names = [];
+        foreach ($loader instanceof \Twig\Loader\FilesystemLoader ? $loader->getPaths() : [$this->root . '/templates'] as $dir) {
+            if (!is_dir($dir)) {
                 continue;
             }
-            $app->twig->load(substr($file->getPathname(), strlen($dir) + 1));
-            ++$count;
+            $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+            foreach ($files as $file) {
+                if ($file->getExtension() === 'twig') {
+                    $names[str_replace('\\', '/', substr($file->getPathname(), strlen($dir) + 1))] = true;
+                }
+            }
+        }
+        foreach (array_keys($names) as $name) {
+            $app->twig->load($name);
         }
 
-        return $count;
+        return count($names);
     }
 
     /** Invalidates this project's scripts in PHP-FPM's Opcache, then precompiles them all. */

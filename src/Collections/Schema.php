@@ -25,7 +25,7 @@ final class Schema
     public const TYPES = ['string', 'int', 'float', 'bool', 'date', 'url', 'markdown', 'list', 'array'];
 
     /** Keys every item has, so fields can't use them. */
-    public const RESERVED = ['slug', 'language', 'html', 'source'];
+    public const RESERVED = ['slug', 'language', 'html', 'components', 'source'];
 
     /** @var array<string, array{string, bool}> field => [type, required] */
     public readonly array $fields;
@@ -132,6 +132,16 @@ final class Schema
         return $item;
     }
 
+    /** @param array{mixed, string, list<mixed>} $converted */
+    private static function markdown(array $converted, string $field, string $source): string
+    {
+        if ($converted[2] !== []) {
+            throw new \RuntimeException("{$source}: field \"{$field}\": components (::name) only work in the Markdown body, not in fields.");
+        }
+
+        return $converted[1];
+    }
+
     private function value(string $type, mixed $value, string $field, string $source, MarkdownParser $markdown): mixed
     {
         $invalid = static fn (string $expected) => new \RuntimeException("{$source}: field \"{$field}\" must be {$expected}.");
@@ -143,7 +153,7 @@ final class Schema
             'bool' => is_bool($value) ? $value : throw $invalid('true or false'),
             'date' => MarkdownParser::date($value, $source, $field),
             'url' => is_string($value) && preg_match('#^(/(?!/)\S*|https://\S+)$#i', $value) ? $value : throw $invalid('a /path or an https:// URL'),
-            'markdown' => is_string($value) ? $markdown->convert($value, "{$source} ({$field})")[1] : throw $invalid('Markdown text'),
+            'markdown' => is_string($value) ? self::markdown($markdown->convert($value, "{$source} ({$field})"), $field, $source) : throw $invalid('Markdown text'),
             'list' => is_array($value) && array_is_list($value) && array_filter($value, static fn ($v) => !is_scalar($v)) === []
                 ? $value : throw $invalid('a list of plain values, e.g. [a, b]'),
             'array' => is_array($value) ? $value : throw $invalid('a list or a mapping'),

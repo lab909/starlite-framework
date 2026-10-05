@@ -48,6 +48,11 @@ final class Kernel
     public readonly Container $container;
     public readonly string $cacheDir;
 
+    /** The framework's default templates (content components…), after the site's and packages'. */
+    public const TEMPLATES = __DIR__ . '/../resources/templates';
+
+    private readonly FilesystemLoader $templates;
+
     private readonly RequestStack $requests;
     private readonly SameOriginCsrfTokenManager $csrf;
 
@@ -142,9 +147,16 @@ final class Kernel
         $this->container = new Container($this);
         $this->translations = new Translations($root . '/translations', $this->site, $debug ? null : $this->cacheDir . '/translations', $debug);
         $this->router = new Router($this->cacheDir, $debug);
-        $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site);
-        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site);
-        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage);
+        // Templates: the site's first, then packages' (addTemplates()), then the framework's defaults,
+        // so a site overrides any of them by creating a file with the same name. The defaults are also
+        // reachable as @starlite/…, for an override that extends the original.
+        $templates = $this->templates = new FilesystemLoader([$root . '/templates', self::TEMPLATES]);
+        $templates->addPath(self::TEMPLATES, 'starlite');
+        // Content components (::name{…} in Markdown) must have a template: checked when content compiles.
+        $componentExists = static fn (string $name): bool => $templates->exists("_components/{$name}.twig");
+        $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site, $componentExists);
+        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site, $componentExists);
+        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage, $componentExists);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->publicConfig = new PublicConfig($public, $secret);
         $this->csp = $csp ?? new Csp();
@@ -153,7 +165,7 @@ final class Kernel
         $this->requests = new RequestStack();
         $this->csrf = new SameOriginCsrfTokenManager($this->requests);
 
-        $this->twig = new Environment(new FilesystemLoader($root . '/templates'), [
+        $this->twig = new Environment($templates, [
             'cache' => $debug ? false : $this->cacheDir . '/twig',
             'auto_reload' => $debug,
             'debug' => $debug,
@@ -172,6 +184,7 @@ final class Kernel
         $this->twig->addFunction(new TwigFunction('posts', $this->posts(...)));
         $this->twig->addFunction(new TwigFunction('collection', $this->collection(...)));
         $this->twig->addFunction(new TwigFunction('pages', $this->pages(...)));
+        $this->twig->addFunction(new TwigFunction('content', $this->content(...), ['is_safe' => ['html']]));
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
         $this->route(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/datastar', $this->renderDatastarTemplate(...), 'datastar');
@@ -207,6 +220,47 @@ final class Kernel
     public function pages(): Query
     {
         return $this->pages->query();
+    }
+
+    /**
+     * The HTML of a post, page or collection item with its content components rendered: what
+     * templates print with `{{ content(post) }}`. A `::name{…}` line renders `_components/<name>.twig`
+     * with its arguments plus the item itself as `entry`, per request, so components see the current
+     * language, routes and queries. With $link (the Atom feed), a component becomes a link to the item.
+     *
+     * @param array<string, mixed> $item
+     */
+    public function content(array $item, ?string $link = null): string
+    {
+        $components = is_array($item['components'] ?? null) ? $item['components'] : [];
+
+        return (string) preg_replace_callback('/<!--starlite-component:(\d+)-->/', function (array $m) use ($item, $components, $link): string {
+            $component = $components[(int) $m[1]] ?? null;
+            if (!is_array($component)) {
+                return '';
+            }
+            if ($link !== null) {
+                return '<p><a href="' . htmlspecialchars($link, ENT_QUOTES | ENT_HTML5) . '">'
+                    . htmlspecialchars($this->t('Open the page to see this part.'), ENT_QUOTES | ENT_HTML5) . '</a></p>';
+            }
+
+            return $this->twig->render("_components/{$component['name']}.twig", ['entry' => $item] + (array) $component['args']);
+        }, (string) ($item['html'] ?? ''));
+    }
+
+    /**
+     * Adds a folder of templates after the site's own and before the framework's: for a package's
+     * content components and partials, which the site can still override. With a namespace, they're
+     * also reachable as @namespace/…, for an override that extends them.
+     */
+    public function addTemplates(string $dir, ?string $namespace = null): void
+    {
+        $paths = $this->templates->getPaths();
+        array_splice($paths, count($paths) - 1, 0, [$dir]); // just before the framework's, which stays last
+        $this->templates->setPaths($paths);
+        if ($namespace !== null) {
+            $this->templates->addPath($dir, $namespace);
+        }
     }
 
     /**

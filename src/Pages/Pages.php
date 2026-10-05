@@ -38,7 +38,9 @@ use Starlite\Site;
  * Query pages with `pages()` (see Starlite\Query); a page without a version in a language doesn't
  * exist there. Compiled into var/cache/pages.php without APP_DEBUG, like the blog.
  *
- * @phpstan-type Page array{slug: string, path: string, uri: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, order: ?int, updated: ?string, data: array<mixed>, html: string, source: string, assets: list<string>}
+ * @phpstan-type Page array{slug: string, path: string, uri: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, order: ?int, updated: ?string, data: array<mixed>, html: string, components: list<ComponentCall>, source: string, assets: list<string>}
+ *
+ * @phpstan-import-type ComponentCall from MarkdownParser
  */
 final class Pages
 {
@@ -61,6 +63,8 @@ final class Pages
         private readonly string $cacheFile,
         private readonly bool $debug,
         private readonly Site $site,
+        /** @var (\Closure(string): bool)|null whether a component template exists (see MarkdownParser) */
+        private readonly ?\Closure $componentExists = null,
     ) {
     }
 
@@ -164,7 +168,7 @@ final class Pages
     /** @return array<string, array<string, Page>> language => path => page, sorted by path */
     private function compile(): array
     {
-        $parser = new MarkdownParser();
+        $parser = new MarkdownParser($this->componentExists);
         $pages = array_fill_keys(array_keys($this->site->languages), []);
         foreach ($this->folders() as $path => $files) {
             $assets = $this->assets("{$this->contentDir}/{$path}");
@@ -262,7 +266,7 @@ final class Pages
      */
     private function parse(string $file, string $path, string $language, string $source, MarkdownParser $parser, ?array $original): array
     {
-        [$meta, $html] = $parser->convertFile($file, self::ASSET_URL . '/' . $path, $source);
+        [$meta, $html, $components] = $parser->convertFile($file, self::ASSET_URL . '/' . $path, $source);
         if (!is_array($meta)) {
             throw new \RuntimeException("{$source}: missing YAML front matter (at least a title).");
         }
@@ -315,6 +319,7 @@ final class Pages
             'updated' => isset($meta['updated']) ? MarkdownParser::date($meta['updated'], $source, 'updated') : $original['updated'] ?? null,
             'data' => $data,
             'html' => $html,
+            'components' => $components,
             'source' => $source,
             'assets' => [],
         ];

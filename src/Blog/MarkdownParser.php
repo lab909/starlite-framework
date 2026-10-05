@@ -14,6 +14,10 @@ use League\CommonMark\Extension\FrontMatter\Output\RenderedContentWithFrontMatte
 use League\CommonMark\Extension\GithubFlavoredMarkdownExtension;
 use League\CommonMark\Extension\HeadingPermalink\HeadingPermalinkExtension;
 use League\CommonMark\MarkdownConverter;
+use Starlite\Content\Component;
+use Starlite\Content\ComponentRenderer;
+use Starlite\Content\ComponentStartParser;
+use Starlite\Content\ComponentSyntaxError;
 
 /**
  * Turns a post folder's index.md (YAML front matter + Markdown) into a post array.
@@ -36,7 +40,8 @@ use League\CommonMark\MarkdownConverter;
  *
  * This only runs when the blog cache is built, never on a cached production request.
  *
- * @phpstan-type Post array{slug: string, uri: string, language: string, title: string, date: string, updated: ?string, image: ?string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, source: string, assets: list<string>}
+ * @phpstan-type ComponentCall array{name: string, args: array<string, string|int|float|bool>}
+ * @phpstan-type Post array{slug: string, uri: string, language: string, title: string, date: string, updated: ?string, image: ?string, summary: string, tags: list<string>, draft: bool, reading_minutes: int, html: string, components: list<ComponentCall>, source: string, assets: list<string>}
  */
 final class MarkdownParser
 {
@@ -45,7 +50,11 @@ final class MarkdownParser
     /** @var array{?string, ?string, string}|null file being converted, for the link rewriter: [post folder on disk, public asset URL, source]; no folder outside the blog */
     private ?array $current = null;
 
-    public function __construct()
+    /** @var list<ComponentCall> components of the file being converted, in order */
+    private array $components = [];
+
+    /** @param (\Closure(string): bool)|null $componentExists whether `_components/<name>.twig` exists; null: not checked */
+    public function __construct(private readonly ?\Closure $componentExists = null)
     {
         $environment = new Environment([
             // Raw HTML in Markdown is escaped and javascript:/data: links are dropped,
@@ -74,6 +83,9 @@ final class MarkdownParser
         $environment->addExtension(new HeadingPermalinkExtension());
         $environment->addExtension(new ExternalLinkExtension());
         $environment->addEventListener(DocumentParsedEvent::class, $this->rewriteRelativeUrls(...));
+        // ::name{key="value"} lines: content components, rendered per request by Kernel::content().
+        $environment->addBlockStartParser(new ComponentStartParser(), 100);
+        $environment->addRenderer(Component::class, new ComponentRenderer($this->registerComponent(...)));
 
         $this->converter = new MarkdownConverter($environment);
     }
@@ -145,6 +157,7 @@ final class MarkdownParser
             'draft' => $draft,
             'reading_minutes' => max(1, (int) ceil($words / 220)),
             'html' => $html,
+            'components' => $this->components,
             'source' => $source,
             'assets' => [],
         ];
@@ -154,7 +167,7 @@ final class MarkdownParser
      * Front matter and HTML of a Markdown file whose relative links and images point at files in its
      * own folder (content pages), rewritten to $assetUrl like a post's.
      *
-     * @return array{mixed, string} front matter (null without one), HTML
+     * @return array{mixed, string, list<ComponentCall>} front matter (null without one), HTML, components
      */
     public function convertFile(string $path, string $assetUrl, string $source): array
     {
@@ -169,14 +182,14 @@ final class MarkdownParser
             $this->current = null;
         }
 
-        return [$result instanceof RenderedContentWithFrontMatter ? $result->getFrontMatter() : null, $result->getContent()];
+        return [$result instanceof RenderedContentWithFrontMatter ? $result->getFrontMatter() : null, $result->getContent(), $this->components];
     }
 
     /**
      * Front matter and HTML of Markdown outside a post folder (data collections). Relative links to
      * files are refused there: collections have no folder of their own to publish.
      *
-     * @return array{mixed, string} front matter (null without one), HTML
+     * @return array{mixed, string, list<ComponentCall>} front matter (null without one), HTML, components
      */
     public function convert(string $markdown, string $source): array
     {
@@ -187,18 +200,35 @@ final class MarkdownParser
             $this->current = null;
         }
 
-        return [$result instanceof RenderedContentWithFrontMatter ? $result->getFrontMatter() : null, $result->getContent()];
+        return [$result instanceof RenderedContentWithFrontMatter ? $result->getFrontMatter() : null, $result->getContent(), $this->components];
     }
 
     /** Converts Markdown; a YAML error in the front matter names the file, like every other content error. */
     private function convertMarkdown(string $markdown, string $source): \League\CommonMark\Output\RenderedContentInterface
     {
+        $this->components = [];
         try {
             return $this->converter->convert($markdown);
         } catch (\League\CommonMark\Extension\FrontMatter\Exception\InvalidFrontMatterException $e) {
             $reason = $e->getPrevious()?->getMessage() ?? $e->getMessage();
             throw new \RuntimeException("{$source}: invalid YAML front matter: {$reason} (values containing \": \" need quotes)", 0, $e);
+        } catch (\RuntimeException $e) {
+            // Thrown from the component parser and renderer, inside CommonMark: name the file.
+            if (!$e instanceof ComponentSyntaxError) {
+                throw $e;
+            }
+            throw new \RuntimeException("{$source}: {$e->getMessage()}", 0, $e);
         }
+    }
+
+    private function registerComponent(Component $component): int
+    {
+        if ($this->componentExists !== null && !($this->componentExists)($component->name)) {
+            throw new ComponentSyntaxError("unknown component \"{$component->name}\" in \"{$component->markup}\": there is no templates/_components/{$component->name}.twig.");
+        }
+        $this->components[] = ['name' => $component->name, 'args' => $component->args];
+
+        return count($this->components) - 1;
     }
 
     /** `![x](cover.jpg)` / `[pdf](files/report.pdf)` → the post's asset URL; the file must exist. */

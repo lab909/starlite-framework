@@ -44,6 +44,8 @@ final class Collections
         private readonly string $cacheFile,
         private readonly bool $debug,
         private readonly Site $site,
+        /** @var (\Closure(string): bool)|null whether a component template exists (see MarkdownParser) */
+        private readonly ?\Closure $componentExists = null,
     ) {
         $schemas = [];
         foreach ($config as $name => $definition) {
@@ -126,7 +128,7 @@ final class Collections
     private function compile(): array
     {
         $this->checkContentFolders();
-        $markdown = new MarkdownParser();
+        $markdown = new MarkdownParser($this->componentExists);
         $default = $this->site->defaultLanguage;
         $compiled = array_fill_keys(array_keys($this->site->languages), []);
 
@@ -140,10 +142,11 @@ final class Collections
                 $original = null;
                 foreach ($files as $language => $file) {
                     $source = "{$name}/{$file}";
-                    [$data, $html] = $this->read("{$this->contentDir}/{$source}", $source, $markdown);
+                    [$data, $html, $components] = $this->read("{$this->contentDir}/{$source}", $source, $markdown);
+                    $inherit = $html === '' && $original !== null; // a translation without a body keeps the default one
                     $item = ['slug' => $slug, 'language' => $language]
                         + $schema->item($data, $source, $markdown, $original)
-                        + ['html' => $html !== '' || $original === null ? $html : $original['html'], 'source' => $source];
+                        + ['html' => $inherit ? $original['html'] : $html, 'components' => $inherit ? $original['components'] : $components, 'source' => $source];
                     $versions[$slug][$language] = $item;
                     $original ??= $item;
                 }
@@ -206,7 +209,7 @@ final class Collections
         return $files;
     }
 
-    /** @return array{array<mixed>, string} fields, HTML of the Markdown body ('' for YAML files) */
+    /** @return array{array<mixed>, string, list<array<string, mixed>>} fields, HTML of the Markdown body ('' for YAML files), its components */
     private function read(string $path, string $source, MarkdownParser $markdown): array
     {
         $contents = file_get_contents($path);
@@ -215,10 +218,10 @@ final class Collections
         }
         try {
             if (str_ends_with($path, '.md')) {
-                [$data, $html] = $markdown->convert($contents, $source);
+                [$data, $html, $components] = $markdown->convert($contents, $source);
                 $data ??= [];
             } else {
-                [$data, $html] = [Yaml::parse($contents), ''];
+                [$data, $html, $components] = [Yaml::parse($contents), '', []];
             }
         } catch (\Symfony\Component\Yaml\Exception\ParseException | \League\CommonMark\Exception\CommonMarkException $e) {
             throw new \RuntimeException("{$source}: invalid YAML: {$e->getMessage()}", 0, $e);
@@ -227,7 +230,7 @@ final class Collections
             throw new \RuntimeException("{$source}: the fields must be a YAML mapping (field: value).");
         }
 
-        return [$data, trim($html)];
+        return [$data, trim($html), $components];
     }
 
     /** Every folder in content/ is the blog, pages or a collection: a stray one is likely a typo. */

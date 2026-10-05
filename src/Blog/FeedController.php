@@ -56,7 +56,8 @@ final class FeedController extends Controller
             $xml->writeElement('summary', $post['summary']);
             $xml->startElement('content');
             $xml->writeAttribute('type', 'html');
-            $xml->text($post['html']);
+            // Feed readers can't run components (Datastar, players…): each becomes a link to the post.
+            $xml->text($this->app->content($post, $url));
             $xml->endElement();
             $xml->endElement();
         }

@@ -51,7 +51,7 @@ final class CollectionsTest extends FrameworkTestCase
         self::assertSame(['what', 'install', 'later'], array_column($faq->all(), 'slug'));
         self::assertSame(3, count($faq));
         $install = $faq->slug('install')->one();
-        self::assertSame(['slug' => 'install', 'language' => 'en', 'question' => 'How do I install it?', 'order' => 2, 'tags' => ['setup'], 'html' => '<p>Run <strong>composer</strong>.</p>', 'source' => 'faq/install.md'], $install);
+        self::assertSame(['slug' => 'install', 'language' => 'en', 'question' => 'How do I install it?', 'order' => 2, 'tags' => ['setup'], 'html' => '<p>Run <strong>composer</strong>.</p>', 'components' => [], 'source' => 'faq/install.md'], $install);
         self::assertNull($faq->slug('what')->one()['tags'] ?? null, 'optional fields are null when missing');
         self::assertSame('', $faq->slug('later')->one()['html'] ?? null);
 
