@@ -29,3 +29,13 @@ jobs:
 
       - name: Static analysis
         run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: JavaScript tests (the 'starlite' browser helpers)
+        run: |
+          npm ci
+          npm test

@@ -2,3 +2,4 @@
 /var/
 # A library doesn't pin its dependencies: apps resolve them with their own lock file.
 /composer.lock
+/node_modules/

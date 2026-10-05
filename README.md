@@ -32,7 +32,9 @@ src/Seo/             page metadata, sitemap, robots.txt
 src/Console/         bin/console: deploy, cache:clear, command discovery
 src/Testing/         KernelTestCase, the base class for app tests
 resources/vite/      Starlite's Vite plugin
-tests/               the framework's test suite, with a fixture project and content
+resources/js/        the Datastar client and the 'starlite' browser helpers
+resources/templates/ default templates: content components (youtube, vimeo), overridable by sites
+tests/               the framework's test suite, with a fixture project and content; tests/js: Vitest
 ```
 
 ## Development
@@ -41,7 +43,10 @@ tests/               the framework's test suite, with a fixture project and cont
 composer update
 composer test        # PHPUnit
 composer analyse     # PHPStan, level 8
+npm install && npm test   # Vitest: the browser helpers in resources/js (Datastar, persist, theme…)
 ```
+
+The skeleton's Playwright tests then check the whole site in a real browser.
 
 To work on the framework inside a site, clone this repository into the site's `packages/starlite/`
 (gitignored) and run `composer update starlite/framework`: Composer then symlinks your clone instead
