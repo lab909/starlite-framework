@@ -19,7 +19,7 @@ final class FeedController extends Controller
     {
         $seo = $this->app->seo;
         $posts = $this->app->posts()->where('draft', false)->limit(self::LIMIT)->all();
-        $author = $seo->site->author ?? $seo->site->name;
+        $author = $seo->site->author() ?? $seo->site->name();
 
         $xml = new \XMLWriter();
         $xml->openMemory();
@@ -31,8 +31,8 @@ final class FeedController extends Controller
         $xml->writeAttribute('xml:lang', $this->app->site->language());
 
         $xml->writeElement('id', $seo->url($this->app->path('blog')));
-        $xml->writeElement('title', $seo->site->name);
-        $xml->writeElement('subtitle', $seo->site->description);
+        $xml->writeElement('title', $seo->site->name());
+        $xml->writeElement('subtitle', $seo->site->description());
         $xml->writeElement('updated', self::time($posts[0]['updated'] ?? $posts[0]['date'] ?? gmdate('Y-m-d')));
         self::link($xml, $seo->url($this->app->path('blog_feed')), 'self', 'application/atom+xml');
         self::link($xml, $seo->url($this->app->path('blog')), 'alternate', 'text/html');

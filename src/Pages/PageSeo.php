@@ -28,7 +28,7 @@ final class PageSeo
             ->description($page['summary'])
             ->url($seo->canonicalUrl())
             ->inLanguage($seo->site->language())
-            ->isPartOf(Schema::webSite()->name($seo->site->name)->url($seo->url('/')));
+            ->isPartOf(Schema::webSite()->name($seo->site->name())->url($seo->url('/')));
         if ($page['updated'] !== null) {
             $webPage->dateModified(new \DateTimeImmutable($page['updated'], new \DateTimeZone('UTC')));
         }

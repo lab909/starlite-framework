@@ -43,7 +43,7 @@ final class Seo extends AbstractExtension implements GlobalsInterface
         $this->title = null;
         $this->description = null;
         $this->canonical = $this->url($path);
-        $this->image = $this->site->image ? $this->url($this->site->image) : null;
+        $this->image = $this->site->image() ? $this->url($this->site->image()) : null;
         $this->type = 'website';
         $this->noindex = false;
         $this->article = [];
@@ -140,17 +140,17 @@ final class Seo extends AbstractExtension implements GlobalsInterface
 
     public function pageTitle(): string
     {
-        return $this->title !== null && $this->title !== '' ? $this->title : $this->site->name;
+        return $this->title !== null && $this->title !== '' ? $this->title : $this->site->name();
     }
 
     public function documentTitle(): string
     {
-        return $this->title !== null && $this->title !== '' ? $this->title . ' · ' . $this->site->name : $this->site->name;
+        return $this->title !== null && $this->title !== '' ? $this->title . ' · ' . $this->site->name() : $this->site->name();
     }
 
     public function render(): string
     {
-        $description = $this->description ?? $this->site->description;
+        $description = $this->description ?? $this->site->description();
 
         $tags = ['<title>' . self::e($this->documentTitle()) . '</title>'];
         $tags[] = self::meta('name', 'description', $description);
@@ -170,7 +170,7 @@ final class Seo extends AbstractExtension implements GlobalsInterface
             }
         }
 
-        $tags[] = self::meta('property', 'og:site_name', $this->site->name);
+        $tags[] = self::meta('property', 'og:site_name', $this->site->name());
         $tags[] = self::meta('property', 'og:type', $this->type);
         $tags[] = self::meta('property', 'og:title', $this->pageTitle());
         $tags[] = self::meta('property', 'og:description', $description);

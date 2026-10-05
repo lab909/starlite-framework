@@ -15,7 +15,7 @@ final class GreetCommand extends AppCommand
 {
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $output->writeln('greet from ' . $this->app()->site->name . ' debug=' . var_export($this->app()->debug, true));
+        $output->writeln('greet from ' . $this->app()->site->name() . ' debug=' . var_export($this->app()->debug, true));
         is_dir($this->app()->cacheDir) || mkdir($this->app()->cacheDir, 0777, true);
         file_put_contents($this->app()->cacheDir . '/fixture-command.txt', 'ran');
 
