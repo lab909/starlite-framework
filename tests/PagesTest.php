@@ -33,7 +33,7 @@ final class PagesTest extends FrameworkTestCase
             ['privacy', 'legal', 2, 'Privacy', 'How we handle data.', '/media/pages/legal/privacy/shield.png', null, null, null, '2026-09-15', []],
             [$privacy['slug'], $privacy['parent'], $privacy['depth'], $privacy['title'], $privacy['summary'], $privacy['image'], $privacy['template'], $privacy['form'], $privacy['order'], $privacy['updated'], $privacy['data']],
         );
-        self::assertStringContainsString('<img src="/media/pages/legal/privacy/shield.png" alt="Shield" />', $privacy['html']);
+        self::assertStringContainsString('<img src="/media/pages/legal/privacy/shield.png" alt="Shield" width="4" height="4" loading="lazy" decoding="async">', $privacy['html']);
         self::assertStringContainsString('href="/media/pages/legal/privacy/policy.pdf"', $privacy['html']);
         self::assertSame(['policy.pdf', 'shield.png'], $privacy['assets'], 'notes.txt is not a publishable type');
         $legal = $pages->where('path', 'legal')->one();
@@ -164,7 +164,7 @@ final class PagesTest extends FrameworkTestCase
         self::assertSame(404, $this->request($app, '/media/pages/legal/privacy/../../contact/index.md')->getStatusCode());
 
         $public = $this->tempDir('public');
-        self::assertSame(2, $app->pages->publishAssets($public));
+        self::assertSame(2 + count($app->images->formats), $app->pages->publishAssets($public), 'the PDF, the image, and its versions');
         self::assertFileExists($public . '/media/pages/legal/privacy/shield.png');
         self::assertFileDoesNotExist($public . '/media/pages/legal/privacy/notes.txt');
     }

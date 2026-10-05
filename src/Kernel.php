@@ -8,6 +8,7 @@ use Starlite\Blog\Blog;
 use Starlite\Collections\Collections;
 use Starlite\Content\Embeds;
 use Starlite\Forms\Forms;
+use Starlite\Images\Images;
 use Starlite\Pages\Pages;
 use Starlite\Seo\Seo;
 use starfederation\datastar\Consts;
@@ -43,6 +44,7 @@ final class Kernel
     public readonly Pages $pages;
     public readonly Embeds $embeds;
     public readonly Forms $forms;
+    public readonly Images $images;
     public readonly Vite $vite;
     public readonly PublicConfig $publicConfig;
     public readonly Csp $csp;
@@ -117,6 +119,7 @@ final class Kernel
             $config['media_url'] ?? '',
             $config['forms'] ?? (is_file($root . '/config/forms.php') ? require $root . '/config/forms.php' : []),
             $config['mailer'] ?? [],
+            new Images($config['images_dir'] ?? $root . '/var/images', $config['images'] ?? []),
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -148,6 +151,7 @@ final class Kernel
      *                                       site) or a CDN's https:// base URL (MEDIA_URL)
      * @param array<string, array<mixed>> $forms  form definitions (config/forms.php)
      * @param array{dsn?: ?string, from?: ?string} $mailer MAILER_DSN and MAILER_FROM (config/app.php `mailer`)
+     * @param Images|null          $images   responsive images (config/app.php `images`); var/images/ by default
      */
     public function __construct(
         public readonly string $root,
@@ -163,6 +167,7 @@ final class Kernel
         string $mediaUrl = '',
         array $forms = [],
         array $mailer = [],
+        ?Images $images = null,
     ) {
         $mediaUrl = rtrim($mediaUrl, '/');
         if ($mediaUrl !== '' && !preg_match('#^https://[^/\s?\#]+(/[^\s?\#]*)?$#', $mediaUrl)) {
@@ -181,6 +186,7 @@ final class Kernel
         $templates->addPath(self::TEMPLATES, 'starlite');
         // Content components (::name{…} in Markdown), checked when content compiles: the template must
         // exist, and the default video components need a valid id.
+        $this->images = $images ?? new Images($root . '/var/images');
         $embeds = $this->embeds = new Embeds($root . '/public', $debug, mediaUrl: $mediaUrl);
         $componentCheck = static function (string $name, array $args) use ($templates, $embeds): ?string {
             if (!$templates->exists("_components/{$name}.twig")) {
@@ -190,8 +196,8 @@ final class Kernel
             return isset(Embeds::PROVIDERS[$name]) ? $embeds->check($name, $args) : null;
         };
         $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site, $componentCheck);
-        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site, $componentCheck, $mediaUrl);
-        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage, $componentCheck, $mediaUrl);
+        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site, $componentCheck, $mediaUrl, $this->images);
+        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage, $componentCheck, $mediaUrl, $this->images);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->publicConfig = new PublicConfig($public, $secret);
         $this->csp = $csp ?? new Csp();
@@ -232,6 +238,7 @@ final class Kernel
         // and any other source a component needs on the page it's on.
         $this->twig->addFunction(new TwigFunction('video', $this->video(...)));
         $this->twig->addFunction(new TwigFunction('csp_allow', $this->cspAllow(...)));
+        $this->twig->addFunction(new TwigFunction('image', $this->image(...), ['is_safe' => ['html']]));
 
         $this->forms = new Forms(
             $forms,
@@ -339,6 +346,44 @@ final class Kernel
     {
         (clone $this->csp)->allow($directive, ...$sources); // refuses typos and injection right away
         $this->responseCsp[$directive] = [...$this->responseCsp[$directive] ?? [], ...array_values($sources)];
+    }
+
+    /**
+     * An image for templates: a <picture> with AVIF/WebP versions at several widths when it's a file of a
+     * post or page (see Images), a plain <img> otherwise.
+     *
+     *   {{ image(post.image, '', {loading: 'eager', fetchpriority: 'high', class: 'w-full'}) }}
+     *
+     * Options: preset (from config/app.php `images.presets`), loading ('lazy' or 'eager'), sizes (how
+     * wide it's shown, instead of the preset's), and any <img> attribute.
+     *
+     * @param array<string, string> $options
+     */
+    public function image(?string $url, string $alt = '', array $options = []): string
+    {
+        if ($url === null || $url === '') {
+            return '';
+        }
+        $loading = $options['loading'] ?? 'lazy';
+        $sizes = $options['sizes'] ?? null;
+        $preset = $options['preset'] ?? null;
+        unset($options['loading'], $options['sizes'], $options['preset']);
+
+        return $this->images->picture($this->imageFile($url), $url, $alt, $loading, $sizes, $options, $preset);
+    }
+
+    /** The file behind a post's or page's image URL (with or without MEDIA_URL), or null. */
+    private function imageFile(string $url): ?string
+    {
+        $path = $this->mediaUrl !== '' && str_starts_with($url, $this->mediaUrl) ? substr($url, strlen($this->mediaUrl)) : $url;
+        if (preg_match('#^' . preg_quote(Blog::ASSET_URL, '#') . '/([^/]+)/(.+)$#', $path, $m)) {
+            return $this->blog->asset($m[1], rawurldecode($m[2]));
+        }
+        if (str_starts_with($path, Pages::ASSET_URL . '/')) {
+            return $this->pages->asset(rawurldecode(substr($path, strlen(Pages::ASSET_URL) + 1)));
+        }
+
+        return null;
     }
 
     /**

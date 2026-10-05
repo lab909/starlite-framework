@@ -12,7 +12,8 @@ final class AssetTest extends FrameworkTestCase
 
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('image/png', $response->headers->get('Content-Type'));
-        self::assertSame(file_get_contents(self::CONTENT . '/blog/2026/09/alpha/cover.png'), self::body($response));
+        // Images are served as published: re-saved without metadata, so not byte for byte.
+        self::assertSame([4, 4, IMAGETYPE_PNG], array_slice((array) getimagesizefromstring(self::body($response)), 0, 3));
         self::assertSame('application/pdf', $this->request($this->kernel(), '/media/blog/alpha/files/doc.pdf')->headers->get('Content-Type'));
     }
 

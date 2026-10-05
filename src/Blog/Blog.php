@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Starlite\Blog;
 
 use Starlite\Cache;
+use Starlite\Images\Images;
 use Starlite\Query;
 use Starlite\Site;
 
@@ -60,6 +61,8 @@ final class Blog
         private readonly ?\Closure $componentCheck = null,
         /** Base URL of the files' public URLs: '' (this site) or a CDN, MEDIA_URL */
         private readonly string $mediaUrl = '',
+        /** Responsive versions of images, and originals without metadata (published by publishAssets()) */
+        private readonly ?\Starlite\Images\Images $images = null,
     ) {
     }
 
@@ -140,8 +143,13 @@ final class Blog
                 if (!is_dir(dirname($to)) && !mkdir(dirname($to), 0775, true) && !is_dir(dirname($to))) {
                     throw new \RuntimeException('Cannot create ' . dirname($to) . '.');
                 }
-                copy("{$this->contentDir}/{$folder}/{$file}", $to);
-                ++$count;
+                $source = "{$this->contentDir}/{$folder}/{$file}";
+                if ($this->images !== null && Images::isRaster($file)) {
+                    $count += $this->images->publish($source, dirname($to)); // without metadata, plus its smaller versions
+                } else {
+                    copy($source, $to);
+                    ++$count;
+                }
             }
         }
 
@@ -177,7 +185,7 @@ final class Blog
     /** @return array<string, array<string, Post>> language => slug => post, newest first */
     private function compile(): array
     {
-        $parser = new MarkdownParser($this->componentCheck);
+        $parser = new MarkdownParser($this->componentCheck, $this->images);
         $posts = array_fill_keys(array_keys($this->site->languages), []);
         $folders = [];
         foreach ($this->postFolders() as $folder => [$slug, $draft, $month, $files]) {

@@ -46,7 +46,7 @@ abstract class KernelTestCase extends TestCase
      */
     protected function bootKernel(string $root, bool $debug = true, array $overrides = []): Kernel
     {
-        $app = Kernel::boot($root, $debug, array_replace_recursive(['cache_dir' => $this->tempDir('cache')], $overrides));
+        $app = Kernel::boot($root, $debug, array_replace_recursive(['cache_dir' => $this->tempDir('cache'), 'images_dir' => $this->tempDir('images')], $overrides));
         // Before the first `npm run build`, pages render without their asset tags instead of failing
         // every test: tests that check assets call requireViteBuild().
         $app->vite->allowMissingBuild();

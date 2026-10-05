@@ -3,7 +3,8 @@
 The core of [Starlite](https://lab909.github.io/starlite-framework-docs/): a tiny, database-free PHP
 micro framework for static-like dynamic sites. Datastar for reactivity, Symfony Routing, Twig, a
 Markdown blog with translations, SEO (Open Graph, JSON-LD, hreflang, sitemap, feeds) and Vite,
-all compiled ahead of time for Opcache.
+all compiled ahead of time for Opcache. Freely inspired by [Craft CMS](https://craftcms.com) and
+[Datastar](https://data-star.dev).
 
 **This is the framework package (`starlite/framework`). To build a site, start from the skeleton:
 [lab909/starlite](https://github.com/lab909/starlite).**
@@ -31,6 +32,7 @@ src/Blog/            the Markdown blog: compiler, post SEO, feed, asset serving
 src/Seo/             page metadata, sitemap, robots.txt
 src/Console/         bin/console: deploy, cache:clear, command discovery
 src/Forms/           forms: validation, spam checks (all local), sending with Symfony Mailer
+src/Images/          responsive images (AVIF/WebP, srcset) and originals without metadata
 src/Pages/, src/Collections/, src/Content/   content pages, data collections, content components and embeds
 src/Testing/         KernelTestCase, the base class for app tests
 resources/vite/      Starlite's Vite plugin

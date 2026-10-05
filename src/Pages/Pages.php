@@ -7,6 +7,7 @@ namespace Starlite\Pages;
 use Starlite\Blog\Blog;
 use Starlite\Blog\MarkdownParser;
 use Starlite\Cache;
+use Starlite\Images\Images;
 use Starlite\Query;
 use Starlite\Site;
 
@@ -68,6 +69,8 @@ final class Pages
         private readonly ?\Closure $componentCheck = null,
         /** Base URL of the files' public URLs: '' (this site) or a CDN, MEDIA_URL */
         private readonly string $mediaUrl = '',
+        /** Responsive versions of images, and originals without metadata (published by publishAssets()) */
+        private readonly ?\Starlite\Images\Images $images = null,
     ) {
     }
 
@@ -133,8 +136,13 @@ final class Pages
                     if (!is_dir("{$target}/{$path}") && !mkdir("{$target}/{$path}", 0775, true) && !is_dir("{$target}/{$path}")) {
                         throw new \RuntimeException("Cannot create {$target}/{$path}.");
                     }
-                    copy("{$this->contentDir}/{$path}/{$file}", "{$target}/{$path}/{$file}");
-                    ++$count;
+                    $source = "{$this->contentDir}/{$path}/{$file}";
+                    if ($this->images !== null && Images::isRaster($file)) {
+                        $count += $this->images->publish($source, "{$target}/{$path}"); // without metadata, plus its smaller versions
+                    } else {
+                        copy($source, "{$target}/{$path}/{$file}");
+                        ++$count;
+                    }
                 }
             }
         }
@@ -171,7 +179,7 @@ final class Pages
     /** @return array<string, array<string, Page>> language => path => page, sorted by path */
     private function compile(): array
     {
-        $parser = new MarkdownParser($this->componentCheck);
+        $parser = new MarkdownParser($this->componentCheck, $this->images);
         $pages = array_fill_keys(array_keys($this->site->languages), []);
         foreach ($this->folders() as $path => $files) {
             $assets = $this->assets("{$this->contentDir}/{$path}");

@@ -58,7 +58,7 @@ final class MarkdownParser
      *        checks a component's name and arguments when content compiles (the template exists, the
      *        arguments a default component needs…): an error message, or null if it's fine
      */
-    public function __construct(private readonly ?\Closure $componentCheck = null)
+    public function __construct(private readonly ?\Closure $componentCheck = null, ?\Starlite\Images\Images $images = null)
     {
         $environment = new Environment([
             // Raw HTML in Markdown is escaped and javascript:/data: links are dropped,
@@ -90,6 +90,10 @@ final class MarkdownParser
         // ::name{key="value"} lines: content components, rendered per request by Kernel::content().
         $environment->addBlockStartParser(new ComponentStartParser(), 100);
         $environment->addRenderer(Component::class, new ComponentRenderer($this->registerComponent(...)));
+        if ($images !== null) {
+            // Images from the post's folder: a <picture> with responsive versions.
+            $environment->addRenderer(\League\CommonMark\Extension\CommonMark\Node\Inline\Image::class, new \Starlite\Images\ImageRenderer($images), 10);
+        }
 
         $this->converter = new MarkdownConverter($environment);
     }
@@ -266,6 +270,7 @@ final class MarkdownParser
                 throw new \RuntimeException("{$source}: \"{$url}\" is not a publishable file type (" . implode(', ', array_keys(Blog::ASSET_TYPES)) . ').');
             }
             $node->setUrl($assetUrl . '/' . $path);
+            $node->data->set(\Starlite\Images\ImageRenderer::SOURCE, $dir . '/' . $path);
         }
     }
 
