@@ -56,8 +56,8 @@ final class Blog
         private readonly bool $debug,
         private readonly Site $site,
         public readonly int $perPage = 20,
-        /** @var (\Closure(string): bool)|null whether a component template exists (see MarkdownParser) */
-        private readonly ?\Closure $componentExists = null,
+        /** @var (\Closure(string, array<string, string|int|float|bool>): ?string)|null checks a component (see MarkdownParser) */
+        private readonly ?\Closure $componentCheck = null,
     ) {
     }
 
@@ -175,7 +175,7 @@ final class Blog
     /** @return array<string, array<string, Post>> language => slug => post, newest first */
     private function compile(): array
     {
-        $parser = new MarkdownParser($this->componentExists);
+        $parser = new MarkdownParser($this->componentCheck);
         $posts = array_fill_keys(array_keys($this->site->languages), []);
         $folders = [];
         foreach ($this->postFolders() as $folder => [$slug, $draft, $month, $files]) {

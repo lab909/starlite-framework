@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Starlite\Console;
 
 use Starlite\Blog\Blog;
+use Starlite\Content\Embeds;
 use Starlite\Pages\Pages;
 use Starlite\Cache;
 use Starlite\Kernel;
@@ -28,6 +29,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *   blog          compile the posts and copy their files to public/media/blog/
  *   pages         compile the content pages and copy their files to public/media/pages/
  *   collections   compile the data collections
+ *   embeds        download the posters and titles of ::youtube / ::vimeo videos to public/media/embeds/
  *   translations  compile the translation catalogues
  *   templates     compile every Twig template
  *   vite          cache the Vite manifest
@@ -199,6 +201,14 @@ final class DeployCommand extends Command
             $counts = $app->collections->warmup();
             $io->writeln(sprintf(' ✔ %d data collection%s compiled (%d items)', count($counts), count($counts) === 1 ? '' : 's', array_sum($counts)));
         }];
+        $steps['embeds'] = ['description' => 'Download the posters of embedded videos to public' . Embeds::URL . '/', 'run' => static function () use ($io, $app) {
+            [$videos, $fetched, $failed] = self::fetchEmbeds($app);
+            $io->writeln(sprintf(' ✔ %d embedded video%s (%d new poster%s downloaded)', $videos, $videos === 1 ? '' : 's', $fetched, $fetched === 1 ? '' : 's'));
+            if ($failed !== []) {
+                // Not fatal: those videos show a neutral poster until the next deploy manages to download theirs.
+                $io->warning('No poster for: ' . implode(', ', $failed) . ' (offline, or the video is private or gone).');
+            }
+        }];
         $steps['translations'] = ['description' => 'Compile the translation catalogues', 'run' => static function () use ($io, $app) {
             $io->writeln(sprintf(' ✔ translations compiled for %d languages', $app->translations->warmup()));
         }];
@@ -246,6 +256,42 @@ final class DeployCommand extends Command
         }
 
         return $steps;
+    }
+
+    /**
+     * Every ::youtube / ::vimeo video in posts, pages and collections (any language): downloads the
+     * posters still missing.
+     *
+     * @return array{int, int, list<string>} videos, posters downloaded, videos without a poster
+     */
+    private static function fetchEmbeds(Kernel $app): array
+    {
+        $videos = [];
+        foreach (array_keys($app->site->languages) as $language) {
+            $queries = [$app->posts(), $app->pages()];
+            foreach (array_keys($app->collections->schemas) as $name) {
+                $queries[] = $app->collection($name);
+            }
+            foreach ($queries as $query) {
+                foreach ($query->language($language)->all() as $item) {
+                    foreach ((array) ($item['components'] ?? []) as $component) {
+                        if (is_array($component) && isset(Embeds::PROVIDERS[$component['name'] ?? '']) && is_string($component['args']['id'] ?? null)) {
+                            $videos["{$component['name']}:{$component['args']['id']}"] = [$component['name'], $component['args']['id']];
+                        }
+                    }
+                }
+            }
+        }
+        $fetched = 0;
+        $failed = [];
+        foreach ($videos as $key => [$provider, $id]) {
+            if (!$app->embeds->missing($provider, $id)) {
+                continue;
+            }
+            $app->embeds->fetch($provider, $id) ? ++$fetched : $failed[] = $key;
+        }
+
+        return [count($videos), $fetched, $failed];
     }
 
     /** Compiles every template the site can use: its own, packages' and the framework's (overridden ones once). */

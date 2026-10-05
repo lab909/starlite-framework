@@ -63,8 +63,8 @@ final class Pages
         private readonly string $cacheFile,
         private readonly bool $debug,
         private readonly Site $site,
-        /** @var (\Closure(string): bool)|null whether a component template exists (see MarkdownParser) */
-        private readonly ?\Closure $componentExists = null,
+        /** @var (\Closure(string, array<string, string|int|float|bool>): ?string)|null checks a component (see MarkdownParser) */
+        private readonly ?\Closure $componentCheck = null,
     ) {
     }
 
@@ -168,7 +168,7 @@ final class Pages
     /** @return array<string, array<string, Page>> language => path => page, sorted by path */
     private function compile(): array
     {
-        $parser = new MarkdownParser($this->componentExists);
+        $parser = new MarkdownParser($this->componentCheck);
         $pages = array_fill_keys(array_keys($this->site->languages), []);
         foreach ($this->folders() as $path => $files) {
             $assets = $this->assets("{$this->contentDir}/{$path}");

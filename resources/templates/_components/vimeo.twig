@@ -1,0 +1,6 @@
+{#
+    Default component: `::vimeo{id="76979871"}`, optionally with title="…" and start=90 (seconds).
+    Click-to-load with Vimeo's do-not-track player, see _embeds/video.twig. Override it with
+    templates/_components/vimeo.twig in the site (it can extend '@starlite/_components/vimeo.twig').
+#}
+{% include '_embeds/video.twig' with {video: video('vimeo', id, start ?? 0), title: title ?? null} only %}

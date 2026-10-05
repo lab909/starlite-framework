@@ -1,0 +1,6 @@
+{#
+    Default component: `::youtube{id="dQw4w9WgXcQ"}`, optionally with title="…" and start=90 (seconds).
+    Click-to-load from youtube-nocookie.com, see _embeds/video.twig. Override it with
+    templates/_components/youtube.twig in the site (it can extend '@starlite/_components/youtube.twig').
+#}
+{% include '_embeds/video.twig' with {video: video('youtube', id, start ?? 0), title: title ?? null} only %}

@@ -6,6 +6,7 @@ namespace Starlite;
 
 use Starlite\Blog\Blog;
 use Starlite\Collections\Collections;
+use Starlite\Content\Embeds;
 use Starlite\Pages\Pages;
 use Starlite\Seo\Seo;
 use starfederation\datastar\Consts;
@@ -39,6 +40,7 @@ final class Kernel
     public readonly Blog $blog;
     public readonly Collections $collections;
     public readonly Pages $pages;
+    public readonly Embeds $embeds;
     public readonly Vite $vite;
     public readonly PublicConfig $publicConfig;
     public readonly Csp $csp;
@@ -52,6 +54,9 @@ final class Kernel
     public const TEMPLATES = __DIR__ . '/../resources/templates';
 
     private readonly FilesystemLoader $templates;
+
+    /** @var array<string, list<string>> CSP sources added for the current response only (csp_allow()) */
+    private array $responseCsp = [];
 
     private readonly RequestStack $requests;
     private readonly SameOriginCsrfTokenManager $csrf;
@@ -152,11 +157,19 @@ final class Kernel
         // reachable as @starlite/…, for an override that extends the original.
         $templates = $this->templates = new FilesystemLoader([$root . '/templates', self::TEMPLATES]);
         $templates->addPath(self::TEMPLATES, 'starlite');
-        // Content components (::name{…} in Markdown) must have a template: checked when content compiles.
-        $componentExists = static fn (string $name): bool => $templates->exists("_components/{$name}.twig");
-        $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site, $componentExists);
-        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site, $componentExists);
-        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage, $componentExists);
+        // Content components (::name{…} in Markdown), checked when content compiles: the template must
+        // exist, and the default video components need a valid id.
+        $embeds = $this->embeds = new Embeds($root . '/public', $debug);
+        $componentCheck = static function (string $name, array $args) use ($templates, $embeds): ?string {
+            if (!$templates->exists("_components/{$name}.twig")) {
+                return "unknown component \"{$name}\": there is no templates/_components/{$name}.twig.";
+            }
+
+            return isset(Embeds::PROVIDERS[$name]) ? $embeds->check($name, $args) : null;
+        };
+        $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site, $componentCheck);
+        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site, $componentCheck);
+        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage, $componentCheck);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->publicConfig = new PublicConfig($public, $secret);
         $this->csp = $csp ?? new Csp();
@@ -185,6 +198,10 @@ final class Kernel
         $this->twig->addFunction(new TwigFunction('collection', $this->collection(...)));
         $this->twig->addFunction(new TwigFunction('pages', $this->pages(...)));
         $this->twig->addFunction(new TwigFunction('content', $this->content(...), ['is_safe' => ['html']]));
+        // For components: a video's poster, title and player URL (and its frame-src on this page only),
+        // and any other source a component needs on the page it's on.
+        $this->twig->addFunction(new TwigFunction('video', $this->video(...)));
+        $this->twig->addFunction(new TwigFunction('csp_allow', $this->cspAllow(...)));
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
         $this->route(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/datastar', $this->renderDatastarTemplate(...), 'datastar');
@@ -246,6 +263,45 @@ final class Kernel
 
             return $this->twig->render("_components/{$component['name']}.twig", ['entry' => $item] + (array) $component['args']);
         }, (string) ($item['html'] ?? ''));
+    }
+
+    /** The site's policy plus what this response's components asked for (e.g. a video player's frame-src). */
+    private function responsePolicy(): Csp
+    {
+        if ($this->responseCsp === []) {
+            return $this->csp;
+        }
+        $csp = clone $this->csp;
+        foreach ($this->responseCsp as $directive => $sources) {
+            $csp->allow($directive, ...$sources);
+        }
+
+        return $csp;
+    }
+
+    /**
+     * Adds Content Security Policy sources to the current response only, for what a component needs
+     * on the page it appears on: `{% do csp_allow('media-src', 'https://cdn.example.com') %}`. Every
+     * other page keeps the site's policy.
+     */
+    public function cspAllow(string $directive, string ...$sources): void
+    {
+        (clone $this->csp)->allow($directive, ...$sources); // refuses typos and injection right away
+        $this->responseCsp[$directive] = [...$this->responseCsp[$directive] ?? [], ...array_values($sources)];
+    }
+
+    /**
+     * A YouTube or Vimeo video for the default components: poster (served by this site), title and
+     * player URL. Allows the player in frame-src for this page only.
+     *
+     * @return array{provider: string, name: string, id: string, title: ?string, poster: ?string, player: string, src: string, url: string}
+     */
+    public function video(string $provider, string $id, int $start = 0): array
+    {
+        $video = $this->embeds->video($provider, $id, $start);
+        $this->cspAllow('frame-src', $video['player']);
+
+        return $video;
     }
 
     /**
@@ -363,6 +419,7 @@ final class Kernel
         $this->site->enter($language, $path);
 
         $this->requests->push($request);
+        $this->responseCsp = [];
         $this->seo->reset($this->site->localize($path)); // canonical: /it and /it/ are the same page
         try {
             $response = $this->dispatch($request, $path);
@@ -384,7 +441,7 @@ final class Kernel
         // Pages only (SSE, JSON and files don't load anything), unless the handler set its own policy.
         $type = (string) $response->headers->get('Content-Type', 'text/html');
         if ($this->csp->enabled && str_starts_with($type, 'text/html') && !$response->headers->has($this->csp->headerName())) {
-            $response->headers->set($this->csp->headerName(), $this->csp->header($this->vite->devServer()));
+            $response->headers->set($this->csp->headerName(), $this->responsePolicy()->header($this->vite->devServer()));
         }
 
         // Pages are the same for every visitor (no sessions), so caches may store them

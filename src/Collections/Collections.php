@@ -44,8 +44,8 @@ final class Collections
         private readonly string $cacheFile,
         private readonly bool $debug,
         private readonly Site $site,
-        /** @var (\Closure(string): bool)|null whether a component template exists (see MarkdownParser) */
-        private readonly ?\Closure $componentExists = null,
+        /** @var (\Closure(string, array<string, string|int|float|bool>): ?string)|null checks a component (see MarkdownParser) */
+        private readonly ?\Closure $componentCheck = null,
     ) {
         $schemas = [];
         foreach ($config as $name => $definition) {
@@ -128,7 +128,7 @@ final class Collections
     private function compile(): array
     {
         $this->checkContentFolders();
-        $markdown = new MarkdownParser($this->componentExists);
+        $markdown = new MarkdownParser($this->componentCheck);
         $default = $this->site->defaultLanguage;
         $compiled = array_fill_keys(array_keys($this->site->languages), []);
 

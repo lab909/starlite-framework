@@ -53,8 +53,12 @@ final class MarkdownParser
     /** @var list<ComponentCall> components of the file being converted, in order */
     private array $components = [];
 
-    /** @param (\Closure(string): bool)|null $componentExists whether `_components/<name>.twig` exists; null: not checked */
-    public function __construct(private readonly ?\Closure $componentExists = null)
+    /**
+     * @param (\Closure(string, array<string, string|int|float|bool>): ?string)|null $componentCheck
+     *        checks a component's name and arguments when content compiles (the template exists, the
+     *        arguments a default component needs…): an error message, or null if it's fine
+     */
+    public function __construct(private readonly ?\Closure $componentCheck = null)
     {
         $environment = new Environment([
             // Raw HTML in Markdown is escaped and javascript:/data: links are dropped,
@@ -223,8 +227,9 @@ final class MarkdownParser
 
     private function registerComponent(Component $component): int
     {
-        if ($this->componentExists !== null && !($this->componentExists)($component->name)) {
-            throw new ComponentSyntaxError("unknown component \"{$component->name}\" in \"{$component->markup}\": there is no templates/_components/{$component->name}.twig.");
+        $error = $this->componentCheck !== null ? ($this->componentCheck)($component->name, $component->args) : null;
+        if ($error !== null) {
+            throw new ComponentSyntaxError("\"{$component->markup}\": {$error}");
         }
         $this->components[] = ['name' => $component->name, 'args' => $component->args];
 

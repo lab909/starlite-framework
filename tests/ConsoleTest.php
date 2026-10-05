@@ -67,7 +67,7 @@ final class ConsoleTest extends FrameworkTestCase
         self::assertSame(Command::SUCCESS, $tester->getStatusCode());
         preg_match_all('/^\s{2}(\S+)/m', $tester->getDisplay(), $rows);
         self::assertSame(
-            ['Step', 'composer', 'cache', 'fixture-closure', 'routes', 'blog', 'pages', 'collections', 'translations', 'templates', 'vite', 'fixture-command', 'opcache'],
+            ['Step', 'composer', 'cache', 'fixture-closure', 'routes', 'blog', 'pages', 'collections', 'embeds', 'translations', 'templates', 'vite', 'fixture-command', 'opcache'],
             $rows[1],
         );
         self::assertStringContainsString('vite (skipped)', $tester->getDisplay());

@@ -112,7 +112,7 @@ final class ComponentsTest extends FrameworkTestCase
     /** @return iterable<string, array{string, string}> */
     public static function invalidComponents(): iterable
     {
-        yield 'unknown component' => ['::audio-player{playlist="x"}', '2026/09/comp/index.md: unknown component "audio-player" in "::audio-player{playlist="x"}": there is no templates/_components/audio-player.twig.'];
+        yield 'unknown component' => ['::audio-player{playlist="x"}', '2026/09/comp/index.md: "::audio-player{playlist="x"}": unknown component "audio-player": there is no templates/_components/audio-player.twig.'];
         yield 'expression' => ['::greeting{text=page.title}', 'arguments are key="text", key=12 or key=true, separated by spaces (near "text=page.title")'];
         yield 'single quotes' => ["::greeting{text='hi'}", 'arguments are key="text"'];
         yield 'unclosed' => ['::greeting{text="hi"', 'a component is ::name or ::name{key="value" …}'];
