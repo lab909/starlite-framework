@@ -7,6 +7,7 @@ namespace Starlite;
 use Starlite\Blog\Blog;
 use Starlite\Collections\Collections;
 use Starlite\Content\Embeds;
+use Starlite\Forms\Forms;
 use Starlite\Pages\Pages;
 use Starlite\Seo\Seo;
 use starfederation\datastar\Consts;
@@ -41,6 +42,7 @@ final class Kernel
     public readonly Collections $collections;
     public readonly Pages $pages;
     public readonly Embeds $embeds;
+    public readonly Forms $forms;
     public readonly Vite $vite;
     public readonly PublicConfig $publicConfig;
     public readonly Csp $csp;
@@ -60,6 +62,9 @@ final class Kernel
 
     /** @var array<string, list<string>> CSP sources added for the current response only (csp_allow()) */
     private array $responseCsp = [];
+
+    /** The current response must not be cached (it shows a form's one-time token). */
+    private bool $noStore = false;
 
     private readonly RequestStack $requests;
     private readonly SameOriginCsrfTokenManager $csrf;
@@ -110,6 +115,8 @@ final class Kernel
             ),
             $config['collections'] ?? (is_file($root . '/config/collections.php') ? require $root . '/config/collections.php' : []),
             $config['media_url'] ?? '',
+            $config['forms'] ?? (is_file($root . '/config/forms.php') ? require $root . '/config/forms.php' : []),
+            $config['mailer'] ?? [],
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -139,6 +146,8 @@ final class Kernel
      * @param array<string, array<mixed>> $collections data collection definitions (config/collections.php)
      * @param string               $mediaUrl where post, page and video poster files are served from: '' (this
      *                                       site) or a CDN's https:// base URL (MEDIA_URL)
+     * @param array<string, array<mixed>> $forms  form definitions (config/forms.php)
+     * @param array{dsn?: ?string, from?: ?string} $mailer MAILER_DSN and MAILER_FROM (config/app.php `mailer`)
      */
     public function __construct(
         public readonly string $root,
@@ -152,6 +161,8 @@ final class Kernel
         ?Csp $csp = null,
         array $collections = [],
         string $mediaUrl = '',
+        array $forms = [],
+        array $mailer = [],
     ) {
         $mediaUrl = rtrim($mediaUrl, '/');
         if ($mediaUrl !== '' && !preg_match('#^https://[^/\s?\#]+(/[^\s?\#]*)?$#', $mediaUrl)) {
@@ -200,6 +211,8 @@ final class Kernel
             'auto_reload' => $debug,
             'debug' => $debug,
             'strict_variables' => $debug,
+            // By file name: HTML for *.twig, none for *.txt.twig (plain-text emails).
+            'autoescape' => 'name',
         ]);
         $this->twig->addExtension($this->datastar);
         $this->twig->addExtension($this->vite);
@@ -219,6 +232,21 @@ final class Kernel
         // and any other source a component needs on the page it's on.
         $this->twig->addFunction(new TwigFunction('video', $this->video(...)));
         $this->twig->addFunction(new TwigFunction('csp_allow', $this->cspAllow(...)));
+
+        $this->forms = new Forms(
+            $forms,
+            $this->twig,
+            $this->t(...),
+            function (): void {
+                $this->noStore = true;
+            },
+            $secret,
+            $this->cacheDir . '/forms',
+            $mailer['dsn'] ?? null,
+            $mailer['from'] ?? null,
+            $this->site->name(),
+        );
+        $this->twig->addFunction(new TwigFunction('form_spam', $this->forms->spamMarkup(...), ['is_safe' => ['html']]));
 
         // Endpoint used by datastar.get() / post() / put() / patch() / delete().
         $this->route(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/datastar', $this->renderDatastarTemplate(...), 'datastar');
@@ -280,6 +308,12 @@ final class Kernel
 
             return $this->twig->render("_components/{$component['name']}.twig", ['entry' => $item] + (array) $component['args']);
         }, (string) ($item['html'] ?? ''));
+    }
+
+    /** Whether rendering this response printed a form's one-time token (see Forms). */
+    private function renderedAForm(): bool
+    {
+        return $this->noStore;
     }
 
     /** The site's policy plus what this response's components asked for (e.g. a video player's frame-src). */
@@ -437,6 +471,7 @@ final class Kernel
 
         $this->requests->push($request);
         $this->responseCsp = [];
+        $this->noStore = false;
         $this->seo->reset($this->site->localize($path)); // canonical: /it and /it/ are the same page
         try {
             $response = $this->dispatch($request, $path);
@@ -465,7 +500,10 @@ final class Kernel
         // and revalidate cheaply: an unchanged page is answered with an empty 304.
         // Streamed and file responses have no body in memory (getContent() is false): SSE is never
         // cached, and files bring their own ETag and Last-Modified.
-        if ($request->isMethodCacheable() && $response->isOk()) {
+        if ($this->renderedAForm()) {
+            // A form's one-time token is on this page: never stored, by the browser or a CDN.
+            $response->headers->set('Cache-Control', 'no-store, private');
+        } elseif ($request->isMethodCacheable() && $response->isOk()) {
             if ($response->getContent() !== false) {
                 $response->setEtag(hash('xxh128', $response->getContent()));
                 $response->setPublic();

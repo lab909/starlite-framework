@@ -30,6 +30,8 @@ src/                 Kernel, Router, Controller, Datastar, Vite, Site, Translati
 src/Blog/            the Markdown blog: compiler, post SEO, feed, asset serving
 src/Seo/             page metadata, sitemap, robots.txt
 src/Console/         bin/console: deploy, cache:clear, command discovery
+src/Forms/           forms: validation, spam checks (all local), sending with Symfony Mailer
+src/Pages/, src/Collections/, src/Content/   content pages, data collections, content components and embeds
 src/Testing/         KernelTestCase, the base class for app tests
 resources/vite/      Starlite's Vite plugin
 resources/js/        the Datastar client and the 'starlite' browser helpers

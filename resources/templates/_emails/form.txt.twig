@@ -1,0 +1,14 @@
+{#- The email a form sends: plain text (*.txt.twig is not HTML-escaped), every field. A site writes
+    its own as templates/_emails/<form>.txt.twig, with the same variables: values, form, site_name. -#}
+{{ site_name }}: {{ form.name }}
+
+{% for field, value in values %}
+{% if value is same as(true) or value is same as(false) %}
+{{ field }}: {{ value ? 'yes' : 'no' }}
+{% elseif "\n" in value %}
+{{ field }}:
+{{ "\n" ~ value ~ "\n" }}
+{% else %}
+{{ field }}: {{ value }}
+{% endif %}
+{% endfor %}

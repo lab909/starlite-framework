@@ -29,6 +29,7 @@ use Starlite\Site;
  *   updated: 2026-10-01         (optional: last significant change, for the sitemap)
  *   data: {form_title: Write us} (optional: anything else the template needs, translatable)
  *   slug: chi-siamo             (translations only: this language's URL segment instead of the folder name)
+ *   form: contact               (optional: the form from config/forms.php this page shows and receives)
  *   ---
  *
  * A translation (index.<code>.md) keeps the image, template, order, updated and data it omits. With
@@ -38,7 +39,7 @@ use Starlite\Site;
  * Query pages with `pages()` (see Starlite\Query); a page without a version in a language doesn't
  * exist there. Compiled into var/cache/pages.php without APP_DEBUG, like the blog.
  *
- * @phpstan-type Page array{slug: string, path: string, uri: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, order: ?int, updated: ?string, data: array<mixed>, html: string, components: list<ComponentCall>, source: string, assets: list<string>}
+ * @phpstan-type Page array{slug: string, path: string, uri: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, form: ?string, order: ?int, updated: ?string, data: array<mixed>, html: string, components: list<ComponentCall>, source: string, assets: list<string>}
  *
  * @phpstan-import-type ComponentCall from MarkdownParser
  */
@@ -50,10 +51,10 @@ final class Pages
     /** A page path, for the route requirement: segments of lowercase letters, digits and dashes. */
     public const PATH = '[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*';
 
-    public const QUERY_FIELDS = ['slug', 'path', 'uri', 'parent', 'depth', 'language', 'title', 'summary', 'image', 'template', 'order', 'updated'];
+    public const QUERY_FIELDS = ['slug', 'path', 'uri', 'parent', 'depth', 'language', 'title', 'summary', 'image', 'template', 'form', 'order', 'updated'];
     public const SEARCH_FIELDS = ['title', 'summary'];
 
-    private const FRONT_MATTER = ['title', 'summary', 'image', 'template', 'order', 'updated', 'data', 'slug'];
+    private const FRONT_MATTER = ['title', 'summary', 'image', 'template', 'form', 'order', 'updated', 'data', 'slug'];
 
     /** @var array<string, array<string, Page>>|null language => path => page */
     private ?array $pages = null;
@@ -284,6 +285,10 @@ final class Pages
         if ($template !== null && (!is_string($template) || !preg_match('#^[a-z0-9_-]+(?:/[a-z0-9_-]+)*\.twig$#', $template))) {
             throw new \RuntimeException("{$source}: \"template\" must be a template path such as pages/contact.twig.");
         }
+        $form = array_key_exists('form', $meta) ? $meta['form'] : $original['form'] ?? null;
+        if ($form !== null && (!is_string($form) || !preg_match('/^[a-z][a-z0-9_-]*$/', $form))) {
+            throw new \RuntimeException("{$source}: \"form\" must be the name of a form in config/forms.php.");
+        }
         $order = array_key_exists('order', $meta) ? $meta['order'] : $original['order'] ?? null;
         if ($order !== null && !is_int($order)) {
             throw new \RuntimeException("{$source}: \"order\" must be a whole number.");
@@ -317,6 +322,7 @@ final class Pages
                 ? MarkdownParser::image($meta['image'], $dir, $this->mediaUrl . self::ASSET_URL . '/' . $path, $source)
                 : $original['image'] ?? null,
             'template' => $template,
+            'form' => $form,
             'order' => $order,
             'updated' => isset($meta['updated']) ? MarkdownParser::date($meta['updated'], $source, 'updated') : $original['updated'] ?? null,
             'data' => $data,

@@ -30,8 +30,8 @@ final class PagesTest extends FrameworkTestCase
         $privacy = $pages->where('path', 'legal/privacy')->one();
         self::assertNotNull($privacy);
         self::assertSame(
-            ['privacy', 'legal', 2, 'Privacy', 'How we handle data.', '/media/pages/legal/privacy/shield.png', null, null, '2026-09-15', []],
-            [$privacy['slug'], $privacy['parent'], $privacy['depth'], $privacy['title'], $privacy['summary'], $privacy['image'], $privacy['template'], $privacy['order'], $privacy['updated'], $privacy['data']],
+            ['privacy', 'legal', 2, 'Privacy', 'How we handle data.', '/media/pages/legal/privacy/shield.png', null, null, null, '2026-09-15', []],
+            [$privacy['slug'], $privacy['parent'], $privacy['depth'], $privacy['title'], $privacy['summary'], $privacy['image'], $privacy['template'], $privacy['form'], $privacy['order'], $privacy['updated'], $privacy['data']],
         );
         self::assertStringContainsString('<img src="/media/pages/legal/privacy/shield.png" alt="Shield" />', $privacy['html']);
         self::assertStringContainsString('href="/media/pages/legal/privacy/policy.pdf"', $privacy['html']);
@@ -212,9 +212,10 @@ final class PagesTest extends FrameworkTestCase
         yield 'invalid yaml' => [['x/index.md' => "---\ntitle: X\nsummary: Note: this breaks\n---\n"], 'pages/x/index.md: invalid YAML front matter:'];
         yield 'no front matter' => [['x/index.md' => 'Just text'], 'pages/x/index.md: missing YAML front matter'];
         yield 'missing title' => [['x/index.md' => "---\nsummary: S\n---\n"], 'pages/x/index.md: front matter needs a "title"'];
-        yield 'unknown key' => [['x/index.md' => "---\ntitle: X\ncolour: red\n---\n"], 'unknown front matter "colour" (title, summary, image, template, order, updated, data, slug; put anything else under "data")'];
+        yield 'unknown key' => [['x/index.md' => "---\ntitle: X\ncolour: red\n---\n"], 'unknown front matter "colour" (title, summary, image, template, form, order, updated, data, slug; put anything else under "data")'];
         yield 'bad template' => [['x/index.md' => "---\ntitle: X\ntemplate: ../secret.twig\n---\n"], '"template" must be a template path such as pages/contact.twig'];
         yield 'order' => [['x/index.md' => "---\ntitle: X\norder: first\n---\n"], '"order" must be a whole number'];
+        yield 'form' => [['x/index.md' => "---\ntitle: X\nform: [contact]\n---\n"], '"form" must be the name of a form in config/forms.php'];
         yield 'data' => [['x/index.md' => "---\ntitle: X\ndata: text\n---\n"], '"data" must be a mapping'];
         yield 'updated' => [['x/index.md' => "---\ntitle: X\nupdated: soon\n---\n"], 'front matter needs a "updated" in YYYY-MM-DD format'];
         yield 'language' => [['x/index.fr.md' => "---\ntitle: X\n---\n"], 'pages/x/index.fr.md: language "fr" is not configured'];

@@ -65,15 +65,18 @@ abstract class KernelTestCase extends TestCase
         }
     }
 
-    /** @param array<string, string> $headers e.g. ['Sec-Fetch-Site' => 'same-origin'] */
-    protected function request(Kernel $app, string $uri, string $method = 'GET', array $headers = [], ?string $body = null): Response
+    /**
+     * @param array<string, string> $headers    e.g. ['Sec-Fetch-Site' => 'same-origin']
+     * @param array<string, mixed>  $parameters form fields of a POST (or the query of a GET)
+     */
+    protected function request(Kernel $app, string $uri, string $method = 'GET', array $headers = [], ?string $body = null, array $parameters = []): Response
     {
         $server = [];
         foreach ($headers as $name => $value) {
             $server['HTTP_' . strtoupper(str_replace('-', '_', $name))] = $value;
         }
 
-        return $app->handle(Request::create($uri, $method, [], [], [], $server, $body));
+        return $app->handle(Request::create($uri, $method, $parameters, [], [], $server, $body));
     }
 
     /** The body of any response, including streamed (SSE) and file responses. */
