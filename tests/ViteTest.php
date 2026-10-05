@@ -106,6 +106,17 @@ final class ViteTest extends FrameworkTestCase
         (new Vite($this->root(), $this->tempDir('cache'), false))->tags('resources/js/nope.js');
     }
 
+    public function testAMissingBuildCanBeAllowed(): void
+    {
+        $vite = new Vite($this->tempDir('empty'), $this->tempDir('cache'), false);
+        self::assertFalse($vite->built());
+        $vite->allowMissingBuild();
+
+        self::assertSame('<!-- Vite: no build in public/build (run npm run build) -->', $vite->tags('resources/js/app.js'));
+        self::assertSame('', $vite->preload('node_modules/font/inter-latin.woff2'));
+        self::assertStringContainsString('/build/assets/app-123.js', (new Vite($this->root(), $this->tempDir('cache'), false))->tags('resources/js/app.js'), 'with a build, nothing changes');
+    }
+
     public function testWarmupReportsAMissingBuild(): void
     {
         self::assertFalse((new Vite($this->tempDir('empty'), $this->tempDir('cache'), false))->warmup());

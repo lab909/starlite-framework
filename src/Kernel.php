@@ -50,6 +50,9 @@ final class Kernel
     public readonly Container $container;
     public readonly string $cacheDir;
 
+    /** Where post, page and video poster files are served from: '' (this site) or a CDN (MEDIA_URL). */
+    public readonly string $mediaUrl;
+
     /** The framework's default templates (content components…), after the site's and packages'. */
     public const TEMPLATES = __DIR__ . '/../resources/templates';
 
@@ -106,6 +109,7 @@ final class Kernel
                 $config['csp']['sources'] ?? [],
             ),
             $config['collections'] ?? (is_file($root . '/config/collections.php') ? require $root . '/config/collections.php' : []),
+            $config['media_url'] ?? '',
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -133,6 +137,8 @@ final class Kernel
      * @param array<string, mixed> $public config values the browser may read (config/app.php `public`)
      * @param Csp|null             $csp    Content Security Policy; strict defaults when null
      * @param array<string, array<mixed>> $collections data collection definitions (config/collections.php)
+     * @param string               $mediaUrl where post, page and video poster files are served from: '' (this
+     *                                       site) or a CDN's https:// base URL (MEDIA_URL)
      */
     public function __construct(
         public readonly string $root,
@@ -145,7 +151,12 @@ final class Kernel
         array $public = [],
         ?Csp $csp = null,
         array $collections = [],
+        string $mediaUrl = '',
     ) {
+        $mediaUrl = rtrim($mediaUrl, '/');
+        if ($mediaUrl !== '' && !preg_match('#^https://[^/\s?\#]+(/[^\s?\#]*)?$#', $mediaUrl)) {
+            throw new \InvalidArgumentException("MEDIA_URL must be an https:// URL, e.g. https://cdn.example.com (got \"{$mediaUrl}\").");
+        }
         $this->cacheDir = $cacheDir ?? $root . '/var/cache';
         $contentDir ??= $root . '/content';
         $this->site = $site ?? new Site('http://localhost', 'Starlite');
@@ -159,7 +170,7 @@ final class Kernel
         $templates->addPath(self::TEMPLATES, 'starlite');
         // Content components (::name{…} in Markdown), checked when content compiles: the template must
         // exist, and the default video components need a valid id.
-        $embeds = $this->embeds = new Embeds($root . '/public', $debug);
+        $embeds = $this->embeds = new Embeds($root . '/public', $debug, mediaUrl: $mediaUrl);
         $componentCheck = static function (string $name, array $args) use ($templates, $embeds): ?string {
             if (!$templates->exists("_components/{$name}.twig")) {
                 return "unknown component \"{$name}\": there is no templates/_components/{$name}.twig.";
@@ -168,11 +179,17 @@ final class Kernel
             return isset(Embeds::PROVIDERS[$name]) ? $embeds->check($name, $args) : null;
         };
         $this->collections = new Collections($collections, $contentDir, $this->cacheDir . '/collections.php', $debug, $this->site, $componentCheck);
-        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site, $componentCheck);
-        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage, $componentCheck);
+        $this->pages = new Pages($contentDir . '/pages', $this->cacheDir . '/pages.php', $debug, $this->site, $componentCheck, $mediaUrl);
+        $this->blog = new Blog($contentDir . '/blog', $this->cacheDir . '/blog.php', $debug, $this->site, $postsPerPage, $componentCheck, $mediaUrl);
         $this->vite = new Vite($root, $this->cacheDir, $debug);
         $this->publicConfig = new PublicConfig($public, $secret);
         $this->csp = $csp ?? new Csp();
+        if ($mediaUrl !== '') {
+            // Post and page images, videos and posters come from there.
+            $origin = (string) preg_replace('#^(https://[^/]+).*$#', '$1', $mediaUrl);
+            $this->csp->allow('img-src', $origin)->allow('media-src', $origin);
+        }
+        $this->mediaUrl = $mediaUrl;
         $this->datastar = new Datastar($secret, $this->site);
         $this->seo = new Seo($this->site);
         $this->requests = new RequestStack();

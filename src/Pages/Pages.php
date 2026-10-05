@@ -65,6 +65,8 @@ final class Pages
         private readonly Site $site,
         /** @var (\Closure(string, array<string, string|int|float|bool>): ?string)|null checks a component (see MarkdownParser) */
         private readonly ?\Closure $componentCheck = null,
+        /** Base URL of the files' public URLs: '' (this site) or a CDN, MEDIA_URL */
+        private readonly string $mediaUrl = '',
     ) {
     }
 
@@ -266,7 +268,7 @@ final class Pages
      */
     private function parse(string $file, string $path, string $language, string $source, MarkdownParser $parser, ?array $original): array
     {
-        [$meta, $html, $components] = $parser->convertFile($file, self::ASSET_URL . '/' . $path, $source);
+        [$meta, $html, $components] = $parser->convertFile($file, $this->mediaUrl . self::ASSET_URL . '/' . $path, $source);
         if (!is_array($meta)) {
             throw new \RuntimeException("{$source}: missing YAML front matter (at least a title).");
         }
@@ -312,7 +314,7 @@ final class Pages
             'title' => trim($title),
             'summary' => is_string($meta['summary'] ?? null) ? trim($meta['summary']) : MarkdownParser::firstParagraph($html),
             'image' => array_key_exists('image', $meta)
-                ? MarkdownParser::image($meta['image'], $dir, self::ASSET_URL . '/' . $path, $source)
+                ? MarkdownParser::image($meta['image'], $dir, $this->mediaUrl . self::ASSET_URL . '/' . $path, $source)
                 : $original['image'] ?? null,
             'template' => $template,
             'order' => $order,

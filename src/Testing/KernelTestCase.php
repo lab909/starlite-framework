@@ -46,7 +46,23 @@ abstract class KernelTestCase extends TestCase
      */
     protected function bootKernel(string $root, bool $debug = true, array $overrides = []): Kernel
     {
-        return Kernel::boot($root, $debug, array_replace_recursive(['cache_dir' => $this->tempDir('cache')], $overrides));
+        $app = Kernel::boot($root, $debug, array_replace_recursive(['cache_dir' => $this->tempDir('cache')], $overrides));
+        // Before the first `npm run build`, pages render without their asset tags instead of failing
+        // every test: tests that check assets call requireViteBuild().
+        $app->vite->allowMissingBuild();
+
+        return $app;
+    }
+
+    /**
+     * Skips a test that checks built assets (script tags, preloads…) when `npm run build` hasn't run
+     * yet, with a message saying so. CI builds before testing, so these tests run there.
+     */
+    protected function requireViteBuild(Kernel $app): void
+    {
+        if (!$app->vite->built()) {
+            self::markTestSkipped('No Vite build yet: run `npm run build` (public/build/.vite/manifest.json is missing).');
+        }
     }
 
     /** @param array<string, string> $headers e.g. ['Sec-Fetch-Site' => 'same-origin'] */

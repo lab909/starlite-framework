@@ -58,6 +58,8 @@ final class Blog
         public readonly int $perPage = 20,
         /** @var (\Closure(string, array<string, string|int|float|bool>): ?string)|null checks a component (see MarkdownParser) */
         private readonly ?\Closure $componentCheck = null,
+        /** Base URL of the files' public URLs: '' (this site) or a CDN, MEDIA_URL */
+        private readonly string $mediaUrl = '',
     ) {
     }
 
@@ -192,7 +194,7 @@ final class Blog
             $original = null;
             foreach ($files as $language => $file) {
                 $source = "{$folder}/{$file}";
-                $post = $parser->parseFile("{$this->contentDir}/{$source}", $slug, $language, $draft, $source, self::ASSET_URL . '/' . $slug, $original);
+                $post = $parser->parseFile("{$this->contentDir}/{$source}", $slug, $language, $draft, $source, $this->mediaUrl . self::ASSET_URL . '/' . $slug, $original);
                 if ($language === $this->site->defaultLanguage && $post['uri'] !== $slug) {
                     throw new \RuntimeException("{$source}: \"slug\" is only for translations: in the default language the folder name is the slug, rename the folder instead.");
                 }

@@ -20,6 +20,8 @@ final class Vite extends AbstractExtension
     /** @var array<string, array{file: string, imports?: list<string>, css?: list<string>}>|null */
     private ?array $manifest = null;
 
+    private bool $buildOptional = false;
+
     public function __construct(
         private readonly string $root,
         private readonly string $cacheDir,
@@ -56,7 +58,7 @@ final class Vite extends AbstractExtension
      */
     public function preload(string ...$sources): string
     {
-        if ($this->devServer() !== null) {
+        if ($this->devServer() !== null || ($this->buildOptional && !$this->built())) {
             return '';
         }
         $tags = [];
@@ -71,6 +73,21 @@ final class Vite extends AbstractExtension
         }
 
         return implode("\n", $tags);
+    }
+
+    /**
+     * Without a build, print a comment instead of failing: for tests that don't look at assets
+     * (KernelTestCase turns it on when public/build has no manifest yet).
+     */
+    public function allowMissingBuild(): void
+    {
+        $this->buildOptional = true;
+    }
+
+    /** Whether `npm run build` has written the manifest. */
+    public function built(): bool
+    {
+        return is_file($this->root . '/public/' . $this->buildDir . '/.vite/manifest.json');
     }
 
     /** @param string|list<string> ...$entries entries, or lists of entries; duplicates are printed once */
@@ -88,6 +105,9 @@ final class Vite extends AbstractExtension
             return implode("\n", $tags);
         }
 
+        if ($this->buildOptional && !$this->built()) {
+            return '<!-- Vite: no build in public/' . $this->buildDir . ' (run npm run build) -->';
+        }
         $css = $preloads = $scripts = [];
         foreach ($entries as $entry) {
             $chunk = $this->manifest()[$entry]

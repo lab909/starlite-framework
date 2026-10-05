@@ -38,6 +38,7 @@ final class Embeds
         private readonly string $publicDir,
         private readonly bool $debug,
         ?\Closure $fetch = null,
+        private readonly string $mediaUrl = '',
     ) {
         $this->fetch = $fetch ?? self::download(...);
     }
@@ -86,7 +87,7 @@ final class Embeds
             'name' => $info['name'],
             'id' => $id,
             'title' => $meta['title'] ?? null,
-            'poster' => isset($meta['poster']) ? self::URL . '/' . $meta['poster'] : null,
+            'poster' => isset($meta['poster']) ? $this->mediaUrl . self::URL . '/' . $meta['poster'] : null,
             'player' => $info['player'],
             'src' => match ($provider) {
                 'youtube' => "{$info['player']}/embed/{$id}?autoplay=1&rel=0" . ($start > 0 ? "&start={$start}" : ''),
