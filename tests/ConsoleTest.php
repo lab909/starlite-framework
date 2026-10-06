@@ -55,7 +55,7 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = new CommandTester($this->console($this->project())->find('fixture:greet'));
 
         self::assertSame(Command::SUCCESS, $tester->execute([]));
-        self::assertStringContainsString('greet from Fixture debug=false', $tester->getDisplay());
+        self::assertStringContainsString('greet from Fixture debug=false', self::text($tester));
     }
 
     // --- Deploy ---------------------------------------------------------------------
@@ -70,7 +70,7 @@ final class ConsoleTest extends FrameworkTestCase
             ['Step', 'composer', 'cache', 'fixture-closure', 'routes', 'blog', 'pages', 'collections', 'embeds', 'translations', 'templates', 'vite', 'fixture-command', 'opcache', 'cdn'],
             $rows[1],
         );
-        self::assertStringContainsString('vite (skipped)', $tester->getDisplay());
+        self::assertStringContainsString('vite (skipped)', self::text($tester));
     }
 
     public function testDeployBuildsEverythingAndRunsAppSteps(): void
@@ -79,9 +79,9 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
 
         self::assertSame(Command::SUCCESS, $tester->getStatusCode(), $tester->getDisplay());
-        self::assertStringContainsString('3 blog posts compiled (4 language versions)', $tester->getDisplay());
-        self::assertStringContainsString('greet from Fixture debug=false', $tester->getDisplay(), 'command steps share the production kernel');
-        self::assertStringNotContainsString('CDN', $tester->getDisplay(), 'CDN caching is off: nothing to purge');
+        self::assertStringContainsString('3 blog posts compiled (4 language versions)', self::text($tester));
+        self::assertStringContainsString('greet from Fixture debug=false', self::text($tester), 'command steps share the production kernel');
+        self::assertStringNotContainsString('CDN', self::text($tester), 'CDN caching is off: nothing to purge');
 
         foreach (['routes.matcher.php', 'routes.generator.php', 'blog.php', 'twig'] as $file) {
             self::assertFileExists("{$root}/var/cache/{$file}");
@@ -100,7 +100,7 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
 
         self::assertSame(Command::SUCCESS, $tester->getStatusCode(), $tester->getDisplay());
-        self::assertStringContainsString('CDN purged (the purge command)', $tester->getDisplay());
+        self::assertStringContainsString('CDN purged (the purge command)', self::text($tester));
         self::assertSame("\n", file_get_contents("{$root}/var/purged.txt"), 'everything: no URLs');
     }
 
@@ -111,8 +111,8 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
 
         self::assertSame(Command::FAILURE, $tester->getStatusCode());
-        self::assertStringContainsString('the CDN still has the old pages', $tester->getDisplay());
-        self::assertStringContainsString('cdn:purge --all', $tester->getDisplay());
+        self::assertStringContainsString('the CDN still has the old pages', self::text($tester));
+        self::assertStringContainsString('cdn:purge --all', self::text($tester));
     }
 
     public function testWithoutPurgingDeploySaysWhenChangesShow(): void
@@ -122,7 +122,7 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
 
         self::assertSame(Command::SUCCESS, $tester->getStatusCode());
-        self::assertStringContainsString('changes reach it within 300 seconds', $tester->getDisplay());
+        self::assertStringContainsString('changes reach it within 300 seconds', self::text($tester));
     }
 
     public function testDeployStopsAtAFailingStep(): void
@@ -134,7 +134,7 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
 
         self::assertSame(Command::FAILURE, $tester->getStatusCode());
-        self::assertStringContainsString('Deploy stopped at step "fails"', $tester->getDisplay());
+        self::assertStringContainsString('Deploy stopped at step "fails"', self::text($tester));
         self::assertFileDoesNotExist("{$root}/var/cache/routes.matcher.php", 'later steps did not run');
     }
 
@@ -154,7 +154,7 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = $this->deploy($root, $options);
 
         self::assertSame(Command::INVALID, $tester->getStatusCode());
-        self::assertStringContainsString($message, preg_replace('/\s+/', ' ', $tester->getDisplay()) ?? '');
+        self::assertStringContainsString($message, preg_replace('/\s+/', ' ', self::text($tester)) ?? '');
         self::assertDirectoryDoesNotExist("{$root}/var/cache/twig");
     }
 
@@ -167,7 +167,7 @@ final class ConsoleTest extends FrameworkTestCase
         $tester = $this->deploy($root, ['--list-steps' => true]);
 
         self::assertSame(Command::INVALID, $tester->getStatusCode());
-        self::assertStringContainsString('refers to unknown step "nope"', $tester->getDisplay());
+        self::assertStringContainsString('refers to unknown step "nope"', self::text($tester));
     }
 
     public function testCacheClearKeepsGitkeep(): void
@@ -215,6 +215,15 @@ final class ConsoleTest extends FrameworkTestCase
         rename($this->copyToTemp(self::CONTENT, 'content'), $root . '/content');
 
         return $root;
+    }
+
+    /**
+     * The command's output with Symfony's line wrapping undone: messages wrap at the terminal's width
+     * (80 columns in CI), so a phrase can be split across lines and boxes ("[ERROR]", " ! [NOTE]").
+     */
+    private static function text(CommandTester $tester): string
+    {
+        return (string) preg_replace('/ *\n(?: *!)? +/', ' ', $tester->getDisplay());
     }
 
     /** @param array<string, mixed> $cdn config/app.php `cdn` for the copied project */
