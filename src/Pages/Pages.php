@@ -31,16 +31,17 @@ use Starlite\Site;
  *   data: {form_title: Write us} (optional: anything else the template needs, translatable)
  *   slug: chi-siamo             (translations only: this language's URL segment instead of the folder name)
  *   form: contact               (optional: the form from config/forms.php this page shows and receives)
+ *   cdn: false                  (optional: never cached at the CDN, when config/app.php `cdn` is on)
  *   ---
  *
- * A translation (index.<code>.md) keeps the image, template, order, updated and data it omits. With
+ * A translation (index.<code>.md) keeps the image, template, order, updated, cdn and data it omits. With
  * `slug:` it gets its own URL, combined with its parents' translated slugs: about/credits in Italian
  * can be /it/chi-siamo/riconoscimenti. The folder path (`path`) stays the page's identity; `uri` is
  * its URL in that language, and Kernel::path('page', ['path' => 'about'], 'it') writes it.
  * Query pages with `pages()` (see Starlite\Query); a page without a version in a language doesn't
  * exist there. Compiled into var/cache/pages.php without APP_DEBUG, like the blog.
  *
- * @phpstan-type Page array{slug: string, path: string, uri: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, form: ?string, order: ?int, updated: ?string, data: array<mixed>, html: string, components: list<ComponentCall>, source: string, assets: list<string>}
+ * @phpstan-type Page array{slug: string, path: string, uri: string, parent: string, depth: int, language: string, title: string, summary: string, image: ?string, template: ?string, form: ?string, order: ?int, updated: ?string, cdn: bool, data: array<mixed>, html: string, components: list<ComponentCall>, source: string, assets: list<string>}
  *
  * @phpstan-import-type ComponentCall from MarkdownParser
  */
@@ -55,7 +56,7 @@ final class Pages
     public const QUERY_FIELDS = ['slug', 'path', 'uri', 'parent', 'depth', 'language', 'title', 'summary', 'image', 'template', 'form', 'order', 'updated'];
     public const SEARCH_FIELDS = ['title', 'summary'];
 
-    private const FRONT_MATTER = ['title', 'summary', 'image', 'template', 'form', 'order', 'updated', 'data', 'slug'];
+    private const FRONT_MATTER = ['title', 'summary', 'image', 'template', 'form', 'order', 'updated', 'cdn', 'data', 'slug'];
 
     /** @var array<string, array<string, Page>>|null language => path => page */
     private ?array $pages = null;
@@ -301,6 +302,10 @@ final class Pages
         if ($order !== null && !is_int($order)) {
             throw new \RuntimeException("{$source}: \"order\" must be a whole number.");
         }
+        $cdn = array_key_exists('cdn', $meta) ? $meta['cdn'] : $original['cdn'] ?? true;
+        if (!is_bool($cdn)) {
+            throw new \RuntimeException("{$source}: \"cdn\" is true or false (false: never cached at the CDN).");
+        }
         $data = array_key_exists('data', $meta) ? $meta['data'] : $original['data'] ?? [];
         if (!is_array($data)) {
             throw new \RuntimeException("{$source}: \"data\" must be a mapping (key: value).");
@@ -333,6 +338,7 @@ final class Pages
             'form' => $form,
             'order' => $order,
             'updated' => isset($meta['updated']) ? MarkdownParser::date($meta['updated'], $source, 'updated') : $original['updated'] ?? null,
+            'cdn' => $cdn,
             'data' => $data,
             'html' => $html,
             'components' => $components,

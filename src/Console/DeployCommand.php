@@ -40,6 +40,8 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  *        reload     run a command that clears Opcache, e.g. `sudo systemctl reload php8.4-fpm`
  *                   or `sudo apachectl graceful` (mod_php); files are recompiled on first use
  *        none       do nothing (shared hosting, or opcache.validate_timestamps=1)
+ *   cdn           purge the CDN (config/app.php `cdn`, when it's on and `purge` is set), so it fetches
+ *                 the new pages; last, once the server answers with them
  */
 #[AsCommand('deploy', 'Optimizes the autoloader, rebuilds all caches and refreshes the web server\'s Opcache.')]
 final class DeployCommand extends Command
@@ -226,6 +228,27 @@ final class DeployCommand extends Command
             'cachetool' => $this->refreshWithCachetool($input, $app->cacheDir, $io),
             'reload' => $this->refreshWithReload($reloadCommand, $io),
             default => true, // 'none' (the mode was validated before any step ran)
+        }];
+        $steps['cdn'] = ['description' => 'Purge the CDN, when CDN caching is on', 'run' => static function () use ($io, $app) {
+            if (!$app->cdn->enabled) {
+                return true;
+            }
+            if (!$app->cdn->purgeable()) {
+                $io->note(sprintf('The CDN was not purged (no CDN_PURGE): changes reach it within %d seconds (cdn.ttl).', $app->cdn->ttl()));
+
+                return true;
+            }
+            try {
+                $purger = $app->cdn->purger();
+                $purger->purgeAll();
+            } catch (\Throwable $e) {
+                $io->error("The site is deployed, but the CDN still has the old pages: {$e->getMessage()} Fix it, then run bin/console cdn:purge --all.");
+
+                return false;
+            }
+            $io->writeln(" ✔ CDN purged ({$purger->name()})");
+
+            return true;
         }];
 
         foreach ($app->deploySteps() as $custom) {

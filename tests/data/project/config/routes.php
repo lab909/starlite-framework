@@ -73,6 +73,9 @@ return static function (Kernel $app): void {
         }
         $app->site->setAlternates($alternates);
         PageSeo::apply($app->seo, $page);
+        if (!$page['cdn']) {
+            $app->cdn->skip();
+        }
 
         return $app->render($page['template'] ?? 'content-page.twig', ['page' => $page]);
     }, 'page', ['path' => Pages::PATH], priority: -1);

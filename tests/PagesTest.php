@@ -212,11 +212,12 @@ final class PagesTest extends FrameworkTestCase
         yield 'invalid yaml' => [['x/index.md' => "---\ntitle: X\nsummary: Note: this breaks\n---\n"], 'pages/x/index.md: invalid YAML front matter:'];
         yield 'no front matter' => [['x/index.md' => 'Just text'], 'pages/x/index.md: missing YAML front matter'];
         yield 'missing title' => [['x/index.md' => "---\nsummary: S\n---\n"], 'pages/x/index.md: front matter needs a "title"'];
-        yield 'unknown key' => [['x/index.md' => "---\ntitle: X\ncolour: red\n---\n"], 'unknown front matter "colour" (title, summary, image, template, form, order, updated, data, slug; put anything else under "data")'];
+        yield 'unknown key' => [['x/index.md' => "---\ntitle: X\ncolour: red\n---\n"], 'unknown front matter "colour" (title, summary, image, template, form, order, updated, cdn, data, slug; put anything else under "data")'];
         yield 'bad template' => [['x/index.md' => "---\ntitle: X\ntemplate: ../secret.twig\n---\n"], '"template" must be a template path such as pages/contact.twig'];
         yield 'order' => [['x/index.md' => "---\ntitle: X\norder: first\n---\n"], '"order" must be a whole number'];
         yield 'form' => [['x/index.md' => "---\ntitle: X\nform: [contact]\n---\n"], '"form" must be the name of a form in config/forms.php'];
         yield 'data' => [['x/index.md' => "---\ntitle: X\ndata: text\n---\n"], '"data" must be a mapping'];
+        yield 'cdn' => [['x/index.md' => "---\ntitle: X\ncdn: no-thanks\n---\n"], '"cdn" is true or false'];
         yield 'updated' => [['x/index.md' => "---\ntitle: X\nupdated: soon\n---\n"], 'front matter needs a "updated" in YYYY-MM-DD format'];
         yield 'language' => [['x/index.fr.md' => "---\ntitle: X\n---\n"], 'pages/x/index.fr.md: language "fr" is not configured'];
         yield 'default code' => [['x/index.en.md' => "---\ntitle: X\n---\n"], 'pages/x/index.en.md: the default language (en) is index.md'];

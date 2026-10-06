@@ -67,7 +67,7 @@ final class ConsoleTest extends FrameworkTestCase
         self::assertSame(Command::SUCCESS, $tester->getStatusCode());
         preg_match_all('/^\s{2}(\S+)/m', $tester->getDisplay(), $rows);
         self::assertSame(
-            ['Step', 'composer', 'cache', 'fixture-closure', 'routes', 'blog', 'pages', 'collections', 'embeds', 'translations', 'templates', 'vite', 'fixture-command', 'opcache'],
+            ['Step', 'composer', 'cache', 'fixture-closure', 'routes', 'blog', 'pages', 'collections', 'embeds', 'translations', 'templates', 'vite', 'fixture-command', 'opcache', 'cdn'],
             $rows[1],
         );
         self::assertStringContainsString('vite (skipped)', $tester->getDisplay());
@@ -81,6 +81,7 @@ final class ConsoleTest extends FrameworkTestCase
         self::assertSame(Command::SUCCESS, $tester->getStatusCode(), $tester->getDisplay());
         self::assertStringContainsString('3 blog posts compiled (4 language versions)', $tester->getDisplay());
         self::assertStringContainsString('greet from Fixture debug=false', $tester->getDisplay(), 'command steps share the production kernel');
+        self::assertStringNotContainsString('CDN', $tester->getDisplay(), 'CDN caching is off: nothing to purge');
 
         foreach (['routes.matcher.php', 'routes.generator.php', 'blog.php', 'twig'] as $file) {
             self::assertFileExists("{$root}/var/cache/{$file}");
@@ -90,6 +91,38 @@ final class ConsoleTest extends FrameworkTestCase
         self::assertFileExists("{$root}/var/cache/fixture-command.txt");
         self::assertFileExists("{$root}/public/media/blog/alpha/cover.png");
         self::assertDirectoryDoesNotExist("{$root}/public/media/blog/delta");
+    }
+
+    public function testDeployPurgesTheCdnLast(): void
+    {
+        $root = $this->project();
+        $this->withCdn($root, ['enabled' => true, 'purge' => 'command', 'command' => 'echo "$@" > var/purged.txt']);
+        $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
+
+        self::assertSame(Command::SUCCESS, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('CDN purged (the purge command)', $tester->getDisplay());
+        self::assertSame("\n", file_get_contents("{$root}/var/purged.txt"), 'everything: no URLs');
+    }
+
+    public function testAFailedPurgeFailsTheDeployAndSaysWhatToDo(): void
+    {
+        $root = $this->project();
+        $this->withCdn($root, ['enabled' => true, 'purge' => 'command', 'command' => 'exit 1']);
+        $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
+
+        self::assertSame(Command::FAILURE, $tester->getStatusCode());
+        self::assertStringContainsString('the CDN still has the old pages', $tester->getDisplay());
+        self::assertStringContainsString('cdn:purge --all', $tester->getDisplay());
+    }
+
+    public function testWithoutPurgingDeploySaysWhenChangesShow(): void
+    {
+        $root = $this->project();
+        $this->withCdn($root, ['enabled' => true]);
+        $tester = $this->deploy($root, ['--skip' => 'composer', '--opcache' => 'none']);
+
+        self::assertSame(Command::SUCCESS, $tester->getStatusCode());
+        self::assertStringContainsString('changes reach it within 300 seconds', $tester->getDisplay());
     }
 
     public function testDeployStopsAtAFailingStep(): void
@@ -182,6 +215,13 @@ final class ConsoleTest extends FrameworkTestCase
         rename($this->copyToTemp(self::CONTENT, 'content'), $root . '/content');
 
         return $root;
+    }
+
+    /** @param array<string, mixed> $cdn config/app.php `cdn` for the copied project */
+    private function withCdn(string $root, array $cdn): void
+    {
+        rename("{$root}/config/app.php", "{$root}/config/app.base.php");
+        self::write($root, ['config/app.php' => '<?php return (require __DIR__ . "/app.base.php") + ["cdn" => ' . var_export($cdn, true) . '];']);
     }
 
     private function console(string $root): Application

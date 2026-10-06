@@ -8,6 +8,7 @@ use Monolog\Logger;
 use Monolog\LogRecord;
 use Psr\Log\LoggerInterface;
 use Starlite\Blog\Blog;
+use Starlite\Cdn\Cdn;
 use Starlite\Collections\Collections;
 use Starlite\Content\Embeds;
 use Starlite\Forms\Forms;
@@ -59,6 +60,9 @@ final class Kernel
 
     /** The app's log (see Log): `$app->logger->warning('…')`, or a package's own handler with pushHandler(). */
     public readonly Logger $logger;
+
+    /** Caching at a CDN and purging it (config/app.php `cdn`, off by default). */
+    public readonly Cdn $cdn;
 
     public readonly string $cacheDir;
 
@@ -134,6 +138,7 @@ final class Kernel
             $config['mailer'] ?? [],
             new Images($config['images_dir'] ?? $root . '/var/images', $config['images'] ?? []),
             $config['log'] ?? [],
+            $config['cdn'] ?? [],
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -167,6 +172,7 @@ final class Kernel
      * @param array{dsn?: ?string, from?: ?string} $mailer MAILER_DSN and MAILER_FROM (config/app.php `mailer`)
      * @param Images|null          $images   responsive images (config/app.php `images`); var/images/ by default
      * @param array<string, mixed> $log      logging (config/app.php `log`, see Log); var/log/ by default
+     * @param array<string, mixed> $cdn      CDN caching and purging (config/app.php `cdn`); off by default
      */
     public function __construct(
         public readonly string $root,
@@ -184,6 +190,7 @@ final class Kernel
         array $mailer = [],
         ?Images $images = null,
         array $log = [],
+        array $cdn = [],
     ) {
         $mediaUrl = rtrim($mediaUrl, '/');
         if ($mediaUrl !== '' && !preg_match('#^https://[^/\s?\#]+(/[^\s?\#]*)?$#', $mediaUrl)) {
@@ -240,6 +247,7 @@ final class Kernel
             $this->csp->allow('img-src', $origin)->allow('media-src', $origin);
         }
         $this->mediaUrl = $mediaUrl;
+        $this->cdn = new Cdn($cdn, $root, $this->site->baseUrl);
         $this->datastar = new Datastar($secret, $this->site);
         $this->seo = new Seo($this->site);
         $this->csrf = new SameOriginCsrfTokenManager($this->requests);
@@ -561,6 +569,7 @@ final class Kernel
         $this->requests->push($request);
         $this->responseCsp = [];
         $this->noStore = false;
+        $this->cdn->reset();
         $this->seo->reset($this->site->localize($path)); // canonical: /it and /it/ are the same page
         try {
             $response = $this->dispatch($request, $path);
@@ -595,13 +604,27 @@ final class Kernel
         } elseif ($request->isMethodCacheable() && $response->isOk()) {
             if ($response->getContent() !== false) {
                 $response->setEtag(hash('xxh128', $response->getContent()));
-                $response->setPublic();
-                $response->headers->addCacheControlDirective('no-cache');
+                // A handler that set its own Cache-Control (private, a max-age…) knows best.
+                if (!self::hasCacheControl($response)) {
+                    // With a CDN: kept there for `cdn.ttl`, and served from it while the site is down.
+                    $response->headers->set('Cache-Control', $this->cdn->cacheControl($request) ?? 'no-cache, public');
+                }
             }
             $response->isNotModified($request);
         }
 
         return $response;
+    }
+
+    /**
+     * Whether the response's handler chose how it's cached. Symfony answers hasCacheControlDirective()
+     * with its computed default ("no-cache, private") too, so this reads the directives actually set.
+     */
+    private static function hasCacheControl(Response $response): bool
+    {
+        $set = (fn (): array => $this->cacheControl)->call($response->headers);
+
+        return $set !== [];
     }
 
     private function dispatch(Request $request, string $path): Response
