@@ -71,7 +71,12 @@ export default function starlite({ input = defaultInput(), reload = [] } = {}) {
                         emptyOutDir: build.emptyOutDir ?? true,
                         manifest: build.manifest ?? true,
                         sourcemap: build.sourcemap ?? true,
-                        rolldownOptions: { input: build.rolldownOptions?.input ?? input },
+                        rolldownOptions: {
+                            input: build.rolldownOptions?.input ?? input,
+                            // Keep license comments (/*! … */, @license) in the minified bundles: they're
+                            // copies of third-party code (Datastar) that must carry their notice.
+                            output: { comments: { legal: true }, ...build.rolldownOptions?.output },
+                        },
                     },
                     server: {
                         host: server.host ?? '0.0.0.0',

@@ -55,3 +55,10 @@ The skeleton's Playwright tests then check the whole site in a real browser.
 To work on the framework inside a site, clone this repository into the site's `packages/starlite/`
 (gitignored) and run `composer update starlite/framework`: Composer then symlinks your clone instead
 of installing from GitHub. See the skeleton's `CONTRIBUTING.md`.
+
+## Third-party code
+
+`resources/js/datastar.js` is the [Datastar](https://github.com/starfederation/datastar) client
+(v1.0.2), MIT License, Copyright © Star Federation: see `resources/js/datastar.LICENSE.md`. Its
+license header is kept in sites' built JavaScript (`comments.legal` in the Vite plugin). Everything
+else comes through Composer with its own license.
