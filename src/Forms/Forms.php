@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Starlite\Forms;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Starlite\Forms\Spam\Honeypot;
 use Starlite\Forms\Spam\MaxLinks;
 use Starlite\Forms\Spam\RateLimit;
@@ -54,6 +56,7 @@ final class Forms
         private readonly ?string $mailerDsn,
         private readonly ?string $mailerFrom,
         private readonly string $siteName,
+        private readonly LoggerInterface $logger = new NullLogger(),
         ?\Closure $clock = null,
     ) {
         $forms = [];
@@ -137,7 +140,7 @@ final class Forms
         foreach ($this->checks($form) as $check) {
             $result = $check->check($form, $request);
             if ($result !== null) {
-                error_log("Form \"{$name}\" rejected as spam ({$result->reason}).");
+                $this->logger->notice('Form "{form}" rejected as spam ({reason}).', ['form' => $name, 'reason' => $result->reason]);
 
                 return $result->message === null
                     ? new Submission($name, $values, [], $result->reason, sent: true)
@@ -145,7 +148,7 @@ final class Forms
             }
         }
         $this->send($form, $values);
-        error_log("Form \"{$name}\" sent.");
+        $this->logger->info('Form "{form}" sent.', ['form' => $name]);
 
         return new Submission($name, $values, sent: true);
     }

@@ -21,6 +21,7 @@
         "php": ">=8.4",
         "intervention/image": "^4.3",
         "league/commonmark": "^2.8",
+        "monolog/monolog": "^3.9",
         "psr/container": "^2.0",
         "spatie/schema-org": "^5.0",
         "starfederation/datastar-php": "^1.0",

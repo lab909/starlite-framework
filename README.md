@@ -33,6 +33,7 @@ src/Seo/             page metadata, sitemap, robots.txt
 src/Console/         bin/console: deploy, cache:clear, command discovery
 src/Forms/           forms: validation, spam checks (all local), sending with Symfony Mailer
 src/Images/          responsive images (AVIF/WebP, srcset) and originals without metadata
+src/Log/             the log (Monolog): daily files, email alerts, nothing about visitors
 src/Pages/, src/Collections/, src/Content/   content pages, data collections, content components and embeds
 src/Testing/         KernelTestCase, the base class for app tests
 resources/vite/      Starlite's Vite plugin

@@ -39,33 +39,9 @@ final class FormsTest extends FrameworkTestCase
         $this->sent = new \ArrayObject();
     }
 
-    private string $log = '';
-    private string|false $previousLog = false;
-
-    /** Forms log what happened: captured here (PHPUnit sets its own capture after setUp(), so per test). */
-    private function captureLog(): void
-    {
-        $this->log = $this->tempDir('log') . '/error.log';
-        $this->previousLog = ini_set('error_log', $this->log);
-    }
-
-    protected function tearDown(): void
-    {
-        if ($this->previousLog !== false) {
-            ini_set('error_log', $this->previousLog);
-        }
-        parent::tearDown();
-    }
-
-    private function logged(): string
-    {
-        return is_file($this->log) ? (string) file_get_contents($this->log) : '';
-    }
-
     /** @param array<string, array<mixed>> $forms */
     private function app(array $forms = ['contact' => self::CONTACT], string $from = 'site@example.test'): Kernel
     {
-        $this->captureLog();
         $app = $this->kernel(overrides: ['forms' => $forms, 'mailer' => ['dsn' => 'null://null', 'from' => $from]]);
         $app->forms->useTransport(new class ($this->sent) implements TransportInterface {
             /** @param \ArrayObject<int, Email> $sent */
@@ -226,7 +202,6 @@ final class FormsTest extends FrameworkTestCase
     {
         $forms = ['contact' => ['spam' => ['rate_limit' => '2/hour']] + self::CONTACT];
         $cache = $this->tempDir('cache');
-        $this->captureLog();
         $app = $this->kernel(overrides: ['forms' => $forms, 'cache_dir' => $cache, 'mailer' => ['dsn' => 'null://null', 'from' => 's@example.test']]);
         $app->forms->useTransport(new \Symfony\Component\Mailer\Transport\NullTransport());
 

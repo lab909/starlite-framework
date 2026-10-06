@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace Starlite;
 
+use Monolog\Logger;
+use Monolog\LogRecord;
+use Psr\Log\LoggerInterface;
 use Starlite\Blog\Blog;
 use Starlite\Collections\Collections;
 use Starlite\Content\Embeds;
 use Starlite\Forms\Forms;
 use Starlite\Images\Images;
+use Starlite\Log\Log;
 use Starlite\Pages\Pages;
 use Starlite\Seo\Seo;
 use starfederation\datastar\Consts;
@@ -52,6 +56,10 @@ final class Kernel
     public readonly Site $site;
     public readonly Translations $translations;
     public readonly Container $container;
+
+    /** The app's log (see Log): `$app->logger->warning('…')`, or a package's own handler with pushHandler(). */
+    public readonly Logger $logger;
+
     public readonly string $cacheDir;
 
     /** Where post, page and video poster files are served from: '' (this site) or a CDN (MEDIA_URL). */
@@ -83,6 +91,11 @@ final class Kernel
         self::loadEnv($root);
         $config = array_replace_recursive(require $root . '/config/app.php', $overrides);
         $debug ??= $config['debug'];
+        if (!$debug) {
+            // Exception traces without function arguments: a password or an email address passed to a
+            // function never ends up in the log (PHP's production default, made sure of here).
+            ini_set('zend.exception_ignore_args', '1');
+        }
 
         // Behind a reverse proxy / load balancer, trust its X-Forwarded-* headers (needed for the CSRF origin check).
         if ($config['trusted_proxies'] !== []) {
@@ -120,6 +133,7 @@ final class Kernel
             $config['forms'] ?? (is_file($root . '/config/forms.php') ? require $root . '/config/forms.php' : []),
             $config['mailer'] ?? [],
             new Images($config['images_dir'] ?? $root . '/var/images', $config['images'] ?? []),
+            $config['log'] ?? [],
         );
 
         // The app's extension point: services, Twig extensions and globals, deploy steps.
@@ -152,6 +166,7 @@ final class Kernel
      * @param array<string, array<mixed>> $forms  form definitions (config/forms.php)
      * @param array{dsn?: ?string, from?: ?string} $mailer MAILER_DSN and MAILER_FROM (config/app.php `mailer`)
      * @param Images|null          $images   responsive images (config/app.php `images`); var/images/ by default
+     * @param array<string, mixed> $log      logging (config/app.php `log`, see Log); var/log/ by default
      */
     public function __construct(
         public readonly string $root,
@@ -168,6 +183,7 @@ final class Kernel
         array $forms = [],
         array $mailer = [],
         ?Images $images = null,
+        array $log = [],
     ) {
         $mediaUrl = rtrim($mediaUrl, '/');
         if ($mediaUrl !== '' && !preg_match('#^https://[^/\s?\#]+(/[^\s?\#]*)?$#', $mediaUrl)) {
@@ -177,6 +193,23 @@ final class Kernel
         $contentDir ??= $root . '/content';
         $this->site = $site ?? new Site('http://localhost', 'Starlite');
         $this->container = new Container($this);
+        $this->requests = new RequestStack();
+        $this->logger = Log::create($root, $log, $debug, $mailer, $this->site->name());
+        // Which request an entry comes from: method, path and route only. No IP address, browser or
+        // query string (it can hold an email address or a token).
+        $this->logger->pushProcessor(function (LogRecord $record): LogRecord {
+            $request = $this->requests->getCurrentRequest();
+            if ($request !== null) {
+                $record->extra += array_filter([
+                    'method' => $request->getMethod(),
+                    'path' => mb_strimwidth($request->getPathInfo(), 0, 200, '…'),
+                    'route' => $request->attributes->get('_route'),
+                ], static fn ($value) => $value !== null);
+            }
+
+            return $record;
+        });
+        $this->container->set(LoggerInterface::class, $this->logger);
         $this->translations = new Translations($root . '/translations', $this->site, $debug ? null : $this->cacheDir . '/translations', $debug);
         $this->router = new Router($this->cacheDir, $debug);
         // Templates: the site's first, then packages' (addTemplates()), then the framework's defaults,
@@ -209,7 +242,6 @@ final class Kernel
         $this->mediaUrl = $mediaUrl;
         $this->datastar = new Datastar($secret, $this->site);
         $this->seo = new Seo($this->site);
-        $this->requests = new RequestStack();
         $this->csrf = new SameOriginCsrfTokenManager($this->requests);
 
         $this->twig = new Environment($templates, [
@@ -252,6 +284,7 @@ final class Kernel
             $mailer['dsn'] ?? null,
             $mailer['from'] ?? null,
             $this->site->name(),
+            $this->logger,
         );
         $this->twig->addFunction(new TwigFunction('form_spam', $this->forms->spamMarkup(...), ['is_safe' => ['html']]));
 
@@ -497,7 +530,15 @@ final class Kernel
         // Debug: Symfony's exception page, and PHP warnings throw.
         // Production: uncaught exceptions are logged and rendered by handle(); PHP warnings are only logged.
         // Registered here rather than in boot(), so the console and tests keep their own error handling.
-        $this->debug ? Debug::enable() : ErrorHandler::register()->throwAt(0, true);
+        // Production: PHP warnings and fatal errors go to the log (and its alerts); deprecations are
+        // for development, where Debug shows them.
+        if ($this->debug) {
+            Debug::enable();
+        } else {
+            $errors = ErrorHandler::register();
+            $errors->throwAt(0, true);
+            $errors->setDefaultLogger($this->logger, \E_ALL & ~\E_DEPRECATED & ~\E_USER_DEPRECATED);
+        }
 
         $request = Request::createFromGlobals();
         $this->handle($request)->prepare($request)->send();
@@ -514,6 +555,9 @@ final class Kernel
         }
         $this->site->enter($language, $path);
 
+        // One request's log lines don't end up in the next one's alert (several requests per process:
+        // tests, worker servers). Alerts go out at the end of the process, after the page is sent.
+        $this->logger->reset();
         $this->requests->push($request);
         $this->responseCsp = [];
         $this->noStore = false;
@@ -524,7 +568,7 @@ final class Kernel
             if ($this->debug) {
                 throw $e;
             }
-            error_log((string) $e);
+            $this->logger->error($e->getMessage(), ['exception' => $e]);
             $response = $this->error(500, $this->t('Something went wrong.'));
         } finally {
             $this->requests->pop();
@@ -563,12 +607,14 @@ final class Kernel
     private function dispatch(Request $request, string $path): Response
     {
         try {
-            [$handler, $params, $csrf] = $this->router->match($request->getMethod(), $path);
+            [$handler, $params, $csrf, $route] = $this->router->match($request->getMethod(), $path);
         } catch (ResourceNotFoundException) {
             return $this->error(404, $this->t('Not found.'));
         } catch (MethodNotAllowedException $e) {
             return $this->error(405, $this->t('Method not allowed.'), ['Allow' => implode(', ', $e->getAllowedMethods())]);
         }
+
+        $request->attributes->set('_route', $route);
 
         // Stateless CSRF protection: the browser's Sec-Fetch-Site / Origin headers must show the
         // request comes from this site. No token, cookie or session needed.
@@ -700,7 +746,7 @@ final class Kernel
 
                 return new Response($html, $status, $headers + ['Content-Type' => 'text/html; charset=utf-8']);
             } catch (\Throwable $e) {
-                error_log((string) $e);
+                $this->logger->critical('The error page failed: ' . $e->getMessage(), ['exception' => $e]);
             }
         }
 

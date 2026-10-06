@@ -12,8 +12,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Base class for tests that drive a Starlite app through Kernel::handle(), so no web server is
- * needed: boot the app, send requests, read any response body (including Datastar streams), and
- * use throw-away directories.
+ * needed: boot the app, send requests, read any response body (including Datastar streams) and the
+ * log, and use throw-away directories.
  *
  *   final class AboutTest extends KernelTestCase
  *   {
@@ -37,16 +37,24 @@ abstract class KernelTestCase extends TestCase
             self::remove($dir);
         }
         $this->tempDirs = [];
+        $this->logDir = null;
     }
 
+    private ?string $logDir = null;
+
     /**
-     * Boots the app at $root with a throw-away cache directory.
+     * Boots the app at $root with throw-away cache, image and log directories.
      *
      * @param array<string, mixed> $overrides merged over the app's config/app.php
      */
     protected function bootKernel(string $root, bool $debug = true, array $overrides = []): Kernel
     {
-        $app = Kernel::boot($root, $debug, array_replace_recursive(['cache_dir' => $this->tempDir('cache'), 'images_dir' => $this->tempDir('images')], $overrides));
+        $this->logDir ??= $this->tempDir('log'); // one per test, shared by the apps it boots
+        $app = Kernel::boot($root, $debug, array_replace_recursive([
+            'cache_dir' => $this->tempDir('cache'),
+            'images_dir' => $this->tempDir('images'),
+            'log' => ['path' => $this->logDir . '/app.log'],
+        ], $overrides));
         // Before the first `npm run build`, pages render without their asset tags instead of failing
         // every test: tests that check assets call requireViteBuild().
         $app->vite->allowMissingBuild();
@@ -77,6 +85,18 @@ abstract class KernelTestCase extends TestCase
         }
 
         return $app->handle(Request::create($uri, $method, $parameters, [], [], $server, $body));
+    }
+
+    /** What the apps booted by this test have logged so far (their log files, oldest first). */
+    protected function logged(): string
+    {
+        if ($this->logDir === null) {
+            return '';
+        }
+        $files = glob($this->logDir . '/*.log') ?: [];
+        sort($files);
+
+        return implode('', array_map(static fn (string $file) => (string) file_get_contents($file), $files));
     }
 
     /** The body of any response, including streamed (SSE) and file responses. */

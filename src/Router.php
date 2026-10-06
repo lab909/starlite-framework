@@ -60,7 +60,7 @@ final class Router
     }
 
     /**
-     * @return array{\Closure|array{class-string, string}|class-string, array<string, string>, bool} handler, route parameters, CSRF required
+     * @return array{\Closure|array{class-string, string}|class-string, array<string, string>, bool, string} handler, route parameters, CSRF required, route name
      *
      * @throws \Symfony\Component\Routing\Exception\ResourceNotFoundException
      * @throws \Symfony\Component\Routing\Exception\MethodNotAllowedException
@@ -75,7 +75,7 @@ final class Router
 
         $args = array_filter($params, static fn ($key) => !str_starts_with($key, '_'), ARRAY_FILTER_USE_KEY);
 
-        return [$handler, $args, $csrf];
+        return [$handler, $args, $csrf, (string) $params['_route']];
     }
 
     /** The name of the route a GET request for $path would reach, or null if none matches. */

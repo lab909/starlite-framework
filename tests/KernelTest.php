@@ -59,17 +59,11 @@ final class KernelTest extends FrameworkTestCase
 
     public function testExceptionsInProductionAreLoggedAndHidden(): void
     {
-        $log = $this->tempDir('log') . '/error.log';
-        $previous = ini_set('error_log', $log);
-        try {
-            $response = $this->request($this->kernel(debug: false), '/boom');
-        } finally {
-            ini_set('error_log', (string) $previous);
-        }
+        $response = $this->request($this->kernel(debug: false), '/boom');
 
         self::assertSame(500, $response->getStatusCode());
         self::assertStringNotContainsString('secret failure detail', self::body($response));
-        self::assertStringContainsString('secret failure detail', (string) file_get_contents($log));
+        self::assertStringContainsString('app.ERROR: secret failure detail', $this->logged());
     }
 
     public function testExceptionsInDebugAreRethrown(): void
